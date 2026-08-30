@@ -11,7 +11,7 @@ import soundfile as sf
 
 from stt.audio import AudioError, to_wav16k_mono
 from stt.catalogue import MAX_BIAS_TOKENS, load_catalogue
-from stt.correct import correct, find_matches
+from stt.correct import find_matches
 from stt.engines.base import ASREngine, TranscriptResult
 from stt.parse import parse_order
 
@@ -90,7 +90,7 @@ def test_code_switched_quantity(hawker):
 
 def test_digit_quantity_and_multiple_lines(hawker):
     order = parse_order("wan tan mee gau and 2 kaya toast", hawker)
-    assert [(l.canonical, l.quantity) for l in order.lines] == [
+    assert [(line.canonical, line.quantity) for line in order.lines] == [
         ("WANTON_MEE", 1), ("KAYA_TOAST", 2)
     ]
 

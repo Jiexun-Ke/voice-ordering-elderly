@@ -10,10 +10,10 @@ error rate belongs to MERaLiON-2-*10B*-ASR, not to this 3B model, whose
 accuracy is unpublished. Judge it on our own recordings only.
 """
 
-import importlib.util
 import inspect
 import logging
 import time
+from typing import Any, Callable
 
 from .base import ASREngine, TranscriptResult
 
@@ -27,8 +27,8 @@ class MLXMeralionEngine(ASREngine):
 
     def __init__(self, model: str = "MERaLiON/MERaLiON-2-3B-MLX"):
         self.model_id = model
-        self._model = None
-        self._transcribe = None
+        self._model: Any = None
+        self._transcribe: Callable[..., Any] | None = None
         self._bias_kwarg: str | None = None
 
     @classmethod
@@ -41,9 +41,9 @@ class MLXMeralionEngine(ASREngine):
     def name(self) -> str:
         return f"{self.model_id.rstrip('/').split('/')[-1]}"
 
-    def _load(self):
-        if self._model is not None:
-            return
+    def _load(self) -> Callable[..., Any]:
+        if self._transcribe is not None:
+            return self._transcribe
         from mlx_meralion import load_model, transcribe  # type: ignore
 
         self._model = load_model(self.model_id)
@@ -55,18 +55,19 @@ class MLXMeralionEngine(ASREngine):
             )
         except (TypeError, ValueError):
             self._bias_kwarg = None
+        return self._transcribe
 
     def warm_up(self) -> None:
         self._load()
 
     def transcribe(self, audio_path: str, bias: str | None = None) -> TranscriptResult:
-        self._load()
+        transcribe_fn = self._load()
         kwargs = {}
         if bias and self._bias_kwarg:
             kwargs[self._bias_kwarg] = bias
 
         started = time.perf_counter()
-        result = self._transcribe(self._model, str(audio_path), **kwargs)
+        result = transcribe_fn(self._model, str(audio_path), **kwargs)
         latency_ms = int((time.perf_counter() - started) * 1000)
 
         text = result if isinstance(result, str) else getattr(result, "text", "")

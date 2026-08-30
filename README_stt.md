@@ -155,11 +155,36 @@ differently and it is a classic demo-day failure.
 
 ---
 
-## Tests
+## Tests and verification
+
+Two layers. The first runs anywhere; the second needs a real model, which is
+why it is a script rather than a test.
 
 ```bash
-python -m pytest tests/ -q      # 45 tests, no model or network needed
+python -m pytest tests/ -q          # 45 tests, no model or network needed
+ruff check stt/ tests/ && mypy stt/ --ignore-missing-imports
+
+python scripts/verify.py --record   # everything that needs a real model
 ```
+
+`scripts/verify.py` records a clip from your mic, then checks: the engine
+loads and warms up, **catalogue biasing is actually wired up**, a real
+transcription succeeds and is fast enough, biasing measurably changes the
+output, the port agrees with `voice_ordering.py`, and the live server returns
+the full contract. Exit code 0 means everything passed, so it works in CI too.
+
+Useful variants:
+
+```bash
+python scripts/verify.py --engine qwen --audio clip.wav
+python scripts/verify.py --engine whisper        # tests the fallback path
+```
+
+The biasing check deserves particular attention: if the MLX wrapper exposes
+its biasing parameter under a name this code does not recognise, biasing is
+**silently disabled** — everything still appears to work while accuracy on
+menu terms quietly rests on `correct.py` alone. `verify.py` turns that silent
+failure into a loud one.
 
 ---
 

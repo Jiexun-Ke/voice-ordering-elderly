@@ -100,12 +100,12 @@ def test_catalogue_swap_changes_result(client, wav):
     # Same audio, different merchant: the hawker terms must stop matching.
     client.stub.text = "one packet of jasmine rice and milo tapao"
     grocery = _post(client, wav, catalogue="grocery").json()
-    assert {l["canonical"] for l in grocery["order"]["lines"]} == {
+    assert {line["canonical"] for line in grocery["order"]["lines"]} == {
         "JASMINE_RICE", "MILO"
     }
     hawker = _post(client, wav, catalogue="hawker").json()
     assert "JASMINE_RICE" not in {
-        l["canonical"] for l in hawker["order"]["lines"]
+        line["canonical"] for line in hawker["order"]["lines"]
     }
 
 

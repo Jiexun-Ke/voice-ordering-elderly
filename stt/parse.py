@@ -58,13 +58,19 @@ class Order:
 
     @property
     def total(self) -> float | None:
-        if not self.lines or any(l.price is None for l in self.lines):
+        """None if the order is empty or any line has no price."""
+        if not self.lines:
             return None
-        return round(sum(l.price * l.quantity for l in self.lines), 2)
+        subtotal = 0.0
+        for line in self.lines:
+            if line.price is None:
+                return None
+            subtotal += line.price * line.quantity
+        return round(subtotal, 2)
 
     def to_dict(self) -> dict:
         return {
-            "lines": [l.to_dict() for l in self.lines],
+            "lines": [line.to_dict() for line in self.lines],
             "takeaway": self.takeaway,
             "total": self.total,
         }

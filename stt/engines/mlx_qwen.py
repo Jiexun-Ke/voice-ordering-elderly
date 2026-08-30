@@ -15,6 +15,7 @@ import importlib.util
 import inspect
 import logging
 import time
+from typing import Any, Callable
 
 from .base import ASREngine, TranscriptResult
 
@@ -32,10 +33,10 @@ class MLXQwenEngine(ASREngine):
 
     def __init__(self, model: str = "knoveleng/polyglot-lion-1.7b"):
         self.model_id = model
-        self._session = None
-        self._transcribe_fn = None
+        self._session: Any = None
+        self._transcribe_fn: Callable[..., Any] | None = None
         self._bias_kwarg: str | None = None
-        self._backend = None
+        self._backend: str | None = None
 
     #: Either wrapper package is acceptable; we adapt to whichever is present.
     BACKENDS = ("mlx_qwen3_asr", "qwen3_asr_mlx")
@@ -49,10 +50,14 @@ class MLXQwenEngine(ASREngine):
         short = self.model_id.rstrip("/").split("/")[-1]
         return f"{short}-mlx"
 
-    def _load(self):
-        """Import and instantiate on first use, caching the session."""
-        if self._session is not None:
-            return
+    def _load(self) -> Callable[..., Any]:
+        """Import and instantiate on first use, returning the transcribe fn.
+
+        Returning it (rather than only setting an attribute) keeps the call
+        site provably non-None for type checkers and readers alike.
+        """
+        if self._transcribe_fn is not None:
+            return self._transcribe_fn
 
         session, backend = None, None
         try:
@@ -75,6 +80,7 @@ class MLXQwenEngine(ASREngine):
                 "this engine and accuracy on menu terms will rely on correct.py",
                 backend,
             )
+        return self._transcribe_fn
 
     @staticmethod
     def _detect_bias_kwarg(fn) -> str | None:
@@ -94,14 +100,14 @@ class MLXQwenEngine(ASREngine):
         self._load()
 
     def transcribe(self, audio_path: str, bias: str | None = None) -> TranscriptResult:
-        self._load()
+        transcribe_fn = self._load()
 
         kwargs = {}
         if bias and self._bias_kwarg:
             kwargs[self._bias_kwarg] = bias
 
         started = time.perf_counter()
-        result = self._transcribe_fn(str(audio_path), **kwargs)
+        result = transcribe_fn(str(audio_path), **kwargs)
         latency_ms = int((time.perf_counter() - started) * 1000)
 
         return TranscriptResult(
