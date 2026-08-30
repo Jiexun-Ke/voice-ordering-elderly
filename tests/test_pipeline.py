@@ -245,3 +245,23 @@ def test_default_engine_runs_on_every_platform():
         f"default engine {DEFAULT_ENGINE!r} uses {module!r}, which is not "
         "available on every platform"
     )
+
+
+def test_code_imports_without_pep604_runtime_unions():
+    """Guards the Python 3.9 fix.
+
+    Every module uses `X | None` annotations, which are a runtime TypeError
+    before 3.10 unless the module opts into lazy annotations. macOS ships 3.9
+    as its system Python, so losing this import silently breaks the most
+    likely first-run environment on the team.
+    """
+    import pathlib
+
+    missing = [
+        str(path)
+        for path in pathlib.Path("stt").rglob("*.py")
+        if path.read_text().strip()
+        and "| None" in path.read_text()
+        and "from __future__ import annotations" not in path.read_text()
+    ]
+    assert not missing, f"missing `from __future__ import annotations`: {missing}"
