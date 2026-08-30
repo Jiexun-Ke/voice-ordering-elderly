@@ -44,16 +44,39 @@ def check_platform(engine_name: str) -> None:
     print("\n== environment ==")
     machine, system = platform.machine(), platform.system()
     py = ".".join(map(str, sys.version_info[:2]))
-    record(PASS, f"python {py} on {system}/{machine}")
+
+    # ctranslate2 (which faster-whisper needs) publishes no wheels for 3.13 and
+    # no source dist, so `pip install faster-whisper` fails with a confusing
+    # error. Catch it here rather than letting someone debug pip output.
+    if sys.version_info >= (3, 13):
+        record(FAIL, f"python {py} on {system}/{machine}",
+               "ctranslate2 has no wheels for Python 3.13, so faster-whisper "
+               "cannot install. Use Python 3.12 or older: py -3.12 -m venv .venv")
+    else:
+        record(PASS, f"python {py} on {system}/{machine}")
 
     mlx_engine = engine_name in {"polyglot", "qwen", "meralion"}
+    cuda_engine = engine_name.endswith("-cuda")
     apple_silicon = system == "Darwin" and machine == "arm64"
+
     if mlx_engine and not apple_silicon:
         record(
             WARN, f"engine {engine_name!r} needs Apple Silicon",
-            "MLX will not import here; the service will fall back to whisper. "
-            "Run with --engine whisper to test that path deliberately.",
+            "MLX will not import here, so the service falls back to whisper.\n"
+            "        On Windows/Linux use --engine singlish (CPU, "
+            "Singapore-tuned) or --engine polyglot-cuda (NVIDIA).",
         )
+    elif cuda_engine:
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                record(WARN, f"engine {engine_name!r} needs a visible NVIDIA GPU",
+                       "torch reports no CUDA device; will fall back to whisper. "
+                       "Use --engine singlish for the CPU path.")
+        except ImportError:
+            record(WARN, "torch not installed",
+                   f"{engine_name!r} needs: pip install qwen-asr plus a CUDA torch")
 
 
 def check_tests() -> None:

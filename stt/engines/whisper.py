@@ -10,13 +10,41 @@ Apple Silicon this runs on CPU. That is fine: this engine exists so that
 teammates on Windows and Intel Macs are never blocked, not to be fast.
 """
 
+import logging
 import os
 import time
+from pathlib import Path
 
 from .base import ASREngine, TranscriptResult
 
+log = logging.getLogger(__name__)
+
 # Below this, faster-whisper reliably hallucinates text out of silence.
 MIN_AUDIO_SECONDS = 0.35
+
+# Generic fallback when a requested local checkpoint has not been built yet.
+FALLBACK_MODEL = "small"
+
+
+def _resolve_model(model: str) -> str:
+    """Accept either a hub name ("small") or a local CTranslate2 directory.
+
+    A path is only usable once scripts/convert_singlish.py has produced it, so
+    a missing directory degrades to the generic model with a loud warning
+    rather than an ImportError at first request. This is what lets `singlish`
+    be the documented default on Windows before anyone has run the converter.
+    """
+    looks_like_path = "/" in model or os.sep in model
+    if not looks_like_path:
+        return model
+    if Path(model).is_dir():
+        return model
+    log.warning(
+        "checkpoint %r not found; falling back to %r. Build it with: "
+        "python scripts/convert_singlish.py",
+        model, FALLBACK_MODEL,
+    )
+    return FALLBACK_MODEL
 
 
 class WhisperEngine(ASREngine):
@@ -24,7 +52,7 @@ class WhisperEngine(ASREngine):
 
     def __init__(self, model: str = "small", device: str | None = None,
                  compute_type: str | None = None):
-        self.model_id = model
+        self.model_id = _resolve_model(model)
         # Overridable so the same code serves a CUDA box (e.g. an NVIDIA
         # laptop) without a second engine class.
         self.device = device or os.environ.get("STT_WHISPER_DEVICE", "cpu")

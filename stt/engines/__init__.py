@@ -13,13 +13,25 @@ from .base import ASREngine, TranscriptResult, LOW_CONFIDENCE_THRESHOLD
 
 log = logging.getLogger(__name__)
 
+# A Singlish-finetuned Whisper converted to CTranslate2. Runs on CPU on every
+# platform — the only Singapore-tuned option available to teammates on Windows
+# or Intel Macs. Produced by scripts/convert_singlish.py; WhisperEngine falls
+# back to the generic model if it has not been created yet.
+SINGLISH_CT2_DIR = "models/singlish-ct2"
+
 # name -> (module attr, default model id)
 # The two MLX Qwen entries are the SAME class with a different model id, which
 # is exactly why the Day 4 dialect probe costs one config change.
 REGISTRY = {
+    # Apple Silicon (MLX)
     "polyglot": ("mlx_qwen", "knoveleng/polyglot-lion-1.7b"),
     "qwen": ("mlx_qwen", "Qwen/Qwen3-ASR-1.7B"),
     "meralion": ("mlx_meralion", "MERaLiON/MERaLiON-2-3B-MLX"),
+    # NVIDIA (official qwen-asr package) — Windows or Linux with CUDA
+    "polyglot-cuda": ("cuda_qwen", "knoveleng/polyglot-lion-1.7b"),
+    "qwen-cuda": ("cuda_qwen", "Qwen/Qwen3-ASR-1.7B"),
+    # CPU, every platform including Windows (CTranslate2)
+    "singlish": ("whisper", SINGLISH_CT2_DIR),
     "whisper": ("whisper", "small"),
 }
 
@@ -39,6 +51,10 @@ def _build(name: str, model: str | None) -> ASREngine:
         from .mlx_meralion import MLXMeralionEngine
 
         return MLXMeralionEngine(model=model)
+    if module_name == "cuda_qwen":
+        from .cuda_qwen import CUDAQwenEngine
+
+        return CUDAQwenEngine(model=model)
     if module_name == "whisper":
         from .whisper import WhisperEngine
 
@@ -79,6 +95,7 @@ def get_engine(name: str | None = None, model: str | None = None,
 
 __all__ = [
     "ASREngine",
+    "SINGLISH_CT2_DIR",
     "TranscriptResult",
     "LOW_CONFIDENCE_THRESHOLD",
     "REGISTRY",

@@ -183,3 +183,53 @@ def test_factory_can_refuse_instead_of_falling_back():
 
     with _pytest.raises(RuntimeError, match="no usable backend"):
         get_engine("polyglot", allow_fallback=False)
+
+
+# ---------- cross-platform engines ----------
+
+def test_registry_covers_every_platform():
+    from stt.engines import REGISTRY
+
+    # Apple Silicon, NVIDIA, and plain CPU must each have a Singapore-tuned
+    # option — otherwise a teammate on Windows is stuck with generic Whisper.
+    assert {"polyglot", "polyglot-cuda", "singlish"} <= set(REGISTRY)
+
+
+def test_singlish_falls_back_when_checkpoint_not_built(caplog):
+    # models/singlish-ct2 only exists after scripts/convert_singlish.py runs.
+    # Until then the engine must degrade loudly, not raise.
+    from stt.engines.whisper import FALLBACK_MODEL, WhisperEngine
+
+    engine = WhisperEngine(model="models/definitely-not-built")
+    assert engine.model_id == FALLBACK_MODEL
+
+
+def test_singlish_uses_checkpoint_when_present(tmp_path):
+    from stt.engines.whisper import WhisperEngine
+
+    ct2 = tmp_path / "singlish-ct2"
+    ct2.mkdir()
+    assert WhisperEngine(model=str(ct2)).model_id == str(ct2)
+
+
+def test_plain_model_names_are_not_treated_as_paths():
+    from stt.engines.whisper import WhisperEngine
+
+    # "small" is a hub name, not a directory — it must pass through untouched.
+    assert WhisperEngine(model="small").model_id == "small"
+
+
+def test_cuda_engine_reports_unavailable_without_a_gpu():
+    # Same lazy-import trap as the MLX engines: constructing must succeed,
+    # is_available() must tell the truth so the factory can fall back.
+    from stt.engines.cuda_qwen import CUDAQwenEngine
+
+    engine = CUDAQwenEngine()
+    assert engine.name.endswith("-cuda")
+    assert engine.is_available() is False
+
+
+def test_cuda_engine_falls_back_like_the_mlx_ones():
+    from stt.engines import get_engine
+
+    assert not get_engine("polyglot-cuda").name.endswith("-cuda")

@@ -20,14 +20,32 @@ pip install mlx-qwen3-asr
 uvicorn stt.server:app --reload --host 0.0.0.0 --port 8000
 ```
 
-On **anything that is not an Apple Silicon Mac** (Windows, Linux, Intel Mac),
-skip the MLX step — the service falls back to CPU Whisper automatically:
+### Windows / Linux / Intel Mac
+
+MLX is Apple-Silicon-only, but you are **not** stuck with generic Whisper.
+Build the Singapore-tuned CPU engine once:
 
 ```bash
-STT_ENGINE=whisper uvicorn stt.server:app --host 0.0.0.0 --port 8000
+pip install -r requirements.txt ctranslate2 transformers
+python scripts/convert_singlish.py            # ~1GB download, a few minutes
+
+STT_ENGINE=singlish uvicorn stt.server:app --host 0.0.0.0 --port 8000
 ```
 
-Check it: `curl localhost:8000/health` — look at `engine_ready`.
+**Python 3.12 or older is required.** `ctranslate2` publishes no wheels for
+3.13 and no source distribution, so `pip install faster-whisper` simply fails
+there. On Windows: `py -3.12 -m venv .venv`. No system ffmpeg is needed — audio
+decoding goes through PyAV, which bundles it.
+
+If you have an **NVIDIA GPU** (a gaming laptop counts), you can run the good
+model instead:
+
+```bash
+pip install -U qwen-asr        # plus a CUDA-enabled torch
+STT_ENGINE=polyglot-cuda uvicorn stt.server:app
+```
+
+Check any of these with: `curl localhost:8000/health` — look at `engine_ready`.
 
 ---
 
@@ -74,10 +92,12 @@ Also: `GET /health`, `GET /catalogue?name=hawker`
 ## Choosing an engine
 
 ```bash
-STT_ENGINE=polyglot uvicorn stt.server:app    # default; Polyglot-Lion, Apple Silicon
-STT_ENGINE=qwen     uvicorn stt.server:app    # base Qwen3-ASR — has Cantonese/Minnan
-STT_ENGINE=meralion uvicorn stt.server:app    # MERaLiON-2-3B (pip install mlx-meralion)
-STT_ENGINE=whisper  uvicorn stt.server:app    # CPU, runs anywhere
+STT_ENGINE=polyglot      uvicorn stt.server:app   # default; Apple Silicon
+STT_ENGINE=qwen          uvicorn stt.server:app   # base Qwen3-ASR — Cantonese/Minnan
+STT_ENGINE=meralion      uvicorn stt.server:app   # MERaLiON-2-3B (pip install mlx-meralion)
+STT_ENGINE=polyglot-cuda uvicorn stt.server:app   # NVIDIA GPU, any OS
+STT_ENGINE=singlish      uvicorn stt.server:app   # CPU, any OS — Singapore-tuned
+STT_ENGINE=whisper       uvicorn stt.server:app   # CPU, any OS — generic fallback
 ```
 
 If the chosen engine's backend is not installed, the service logs a warning
@@ -92,7 +112,12 @@ instructions. Trust `engine_ready`, not `engine`.
 | `polyglot` | Apple Silicon | Default. 14.85 avg error on SG's 4 languages. MIT. **No dialect training.** |
 | `qwen` | Apple Silicon | Same code path, one model id. Advertises Cantonese + Minnan. |
 | `meralion` | Apple Silicon | Claims Singlish/Hokkien/Cantonese. The quoted 14.32 belongs to the **10B**, not this 3B — measure it, don't assume. |
-| `whisper` | Anywhere | Fallback. Slower, weaker on Singlish, but never blocks anyone. |
+| `polyglot-cuda` | NVIDIA, any OS | Same model as `polyglot`, official `qwen-asr` runtime instead of MLX. |
+| `singlish` | **CPU, any OS** | Singlish-finetuned Whisper (WER 9.69, IMDA corpus). Best non-Mac option. Needs `convert_singlish.py` first; falls back to `whisper` until then. |
+| `whisper` | CPU, any OS | Generic fallback. Weaker on Singlish, but never blocks anyone. |
+
+Every engine supports catalogue biasing, so switching costs nothing but a
+model swap.
 
 ---
 
@@ -161,7 +186,7 @@ Two layers. The first runs anywhere; the second needs a real model, which is
 why it is a script rather than a test.
 
 ```bash
-python -m pytest tests/ -q          # 45 tests, no model or network needed
+python -m pytest tests/ -q          # 51 tests, no model or network needed
 ruff check stt/ tests/ && mypy stt/ --ignore-missing-imports
 
 python scripts/verify.py --record   # everything that needs a real model
@@ -190,7 +215,7 @@ failure into a loud one.
 
 ## Status — what is and isn't verified
 
-**Verified** (45 passing tests on Linux/x86): catalogue loading and token
+**Verified** (51 passing tests on Linux/x86): catalogue loading and token
 budget, fuzzy correction including unseen ASR corruptions, order parsing with
 code-switched quantities, audio downmix/resample/guards, the full HTTP
 contract, catalogue swapping, biasing on/off, engine fallback and
