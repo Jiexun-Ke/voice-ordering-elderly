@@ -11,6 +11,8 @@ keyword rather than hardcoding one. This costs ~20 lines and removes a whole
 class of "works on my machine" failure.
 """
 
+from __future__ import annotations
+
 import importlib.util
 import inspect
 import logging

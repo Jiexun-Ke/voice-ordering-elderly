@@ -12,6 +12,8 @@ between Polyglot-Lion and base Qwen3-ASR, so the Day 4 dialect probe works
 identically on whichever hardware the team ends up using.
 """
 
+from __future__ import annotations
+
 import importlib.util
 import inspect
 import logging

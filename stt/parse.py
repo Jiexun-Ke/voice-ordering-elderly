@@ -11,6 +11,8 @@ than what is easiest to implement:
     three-item order almost always means the whole order.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .catalogue import Catalogue

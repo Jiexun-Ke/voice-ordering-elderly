@@ -6,6 +6,8 @@ That matters because teammates on Windows or Intel Macs still need to run the
 tests and the catalogue/correction layers.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 

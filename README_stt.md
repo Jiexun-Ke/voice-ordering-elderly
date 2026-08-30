@@ -21,8 +21,22 @@ python scripts/convert_singlish.py         # one-time, ~1GB
 uvicorn stt.server:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Python 3.12 or older is required.** `ctranslate2` publishes no wheels for
-3.13 and no source distribution, so `pip install faster-whisper` fails there.
+**Python 3.10–3.12.** Both ends of that range matter:
+
+| Version | Works? |
+|---|---|
+| 3.13+ | **No** — `ctranslate2` has no wheels and no source dist; the install fails |
+| 3.10–3.12 | **Yes** — everything, including the MLX engines |
+| 3.9 | CPU engines only (`singlish`, `whisper`); MLX needs 3.10+ |
+
+macOS ships 3.9 as its *system* Python. Do not try to upgrade it — install a
+newer one alongside and point the venv at it:
+
+```bash
+brew install python@3.12
+/opt/homebrew/bin/python3.12 -m venv .venv && source .venv/bin/activate
+```
+
 On Windows: `py -3.12 -m venv .venv`. No system ffmpeg needed — PyAV bundles it.
 
 Everything works before you run the converter: the engine falls back to generic

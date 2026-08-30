@@ -14,6 +14,8 @@ Exit code 0 = everything passed. Non-zero = something needs attention, and
 the output says which check and what to do about it.
 """
 
+from __future__ import annotations
+
 import argparse
 import io
 import logging
@@ -50,8 +52,15 @@ def check_platform(engine_name: str) -> None:
     # error. Catch it here rather than letting someone debug pip output.
     if sys.version_info >= (3, 13):
         record(FAIL, f"python {py} on {system}/{machine}",
-               "ctranslate2 has no wheels for Python 3.13, so faster-whisper "
-               "cannot install. Use Python 3.12 or older: py -3.12 -m venv .venv")
+               "ctranslate2 publishes no wheels for 3.13 and no source dist, so "
+               "faster-whisper cannot install.\n        Install 3.12 alongside: "
+               "brew install python@3.12  (macOS) / py -3.12 (Windows)")
+    elif sys.version_info < (3, 10):
+        record(WARN, f"python {py} on {system}/{machine}",
+               "The MLX engines (polyglot, qwen, meralion) require 3.10+, so "
+               "only the CPU engines\n        (singlish, whisper) can run here. "
+               "macOS ships 3.9 — install 3.12 alongside it rather than\n"
+               "        replacing it: brew install python@3.12")
     else:
         record(PASS, f"python {py} on {system}/{machine}")
 

@@ -6,6 +6,8 @@ swapping models a config change rather than a rewrite, which is the whole
 reason we can commit to one engine now and still change our mind on Day 4.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 

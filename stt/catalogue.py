@@ -13,6 +13,8 @@ once. That makes catalogue curation the highest accuracy-per-hour task in the
 project, and it needs no Python.
 """
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field
 from pathlib import Path

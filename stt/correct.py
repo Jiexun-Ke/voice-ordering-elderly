@@ -10,6 +10,8 @@ surface form. Fuzzy matching maps it to CHAR_KWAY_TEOW at ~0.92 similarity,
 and the order is right.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 
