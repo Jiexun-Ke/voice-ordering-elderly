@@ -1,0 +1,23 @@
+# Core service — works on any platform
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+soundfile>=0.12
+numpy>=1.24
+rapidfuzz>=3.9
+
+# Evaluation
+jiwer>=3.0
+
+# Fallback ASR engine (CPU, runs anywhere: Linux / Windows / Intel or Apple Mac)
+faster-whisper>=1.0
+
+# Primary ASR engine (Apple Silicon ONLY — pip install will fail on other platforms).
+# Install separately on a Mac:
+#     pip install mlx-qwen3-asr
+# Optional second engine for the Day 4 dialect probe:
+#     pip install mlx-meralion
+
+# Test-only (starlette TestClient dependency)
+httpx2
+pytest>=8.0
