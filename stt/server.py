@@ -14,7 +14,6 @@ Config (env):
     STT_CATALOGUE  catalogue name or path                 (default: hawker)
 """
 
-from __future__ import annotations
 
 import logging
 import os

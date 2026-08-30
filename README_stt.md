@@ -21,16 +21,9 @@ python scripts/convert_singlish.py         # one-time, ~1GB
 uvicorn stt.server:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Python 3.10–3.12.** Both ends of that range matter:
-
-| Version | Works? |
-|---|---|
-| 3.13+ | **No** — `ctranslate2` has no wheels and no source dist; the install fails |
-| 3.10–3.12 | **Yes** — everything, including the MLX engines |
-| 3.9 | CPU engines only (`singlish`, `whisper`); MLX needs 3.10+ |
-
-macOS ships 3.9 as its *system* Python. Do not try to upgrade it — install a
-newer one alongside and point the venv at it:
+**Python 3.10-3.12 is required.** Below 3.10 the MLX engines will not install;
+3.13+ has no `ctranslate2` wheels. macOS ships 3.9, so install a newer one
+alongside it rather than replacing it:
 
 ```bash
 brew install python@3.12

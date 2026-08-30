@@ -18,10 +18,6 @@ faster-whisper>=1.0
 # Optional second engine for the Day 4 dialect probe:
 #     pip install mlx-meralion
 
-# Test-only. starlette's TestClient needs an HTTP client, and which one it
-# wants depends on the starlette version pip resolves for your Python:
-# newer starlette wants httpx2, the versions that support 3.9 want httpx.
-# Installing both is harmless and avoids a confusing collection error.
-httpx
-httpx2; python_version >= '3.10'
+# Test-only (starlette TestClient dependency)
+httpx2
 pytest>=8.0

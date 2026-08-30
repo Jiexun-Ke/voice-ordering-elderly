@@ -10,7 +10,6 @@ Apple Silicon this runs on CPU. That is fine: this engine exists so that
 teammates on Windows and Intel Macs are never blocked, not to be fast.
 """
 
-from __future__ import annotations
 
 import logging
 import os

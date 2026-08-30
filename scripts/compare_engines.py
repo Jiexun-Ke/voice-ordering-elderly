@@ -16,7 +16,6 @@ rather than computing WER. Use it to decide what to record; use stt.eval once
 you have a labelled set.
 """
 
-from __future__ import annotations
 
 import argparse
 import sys

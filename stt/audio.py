@@ -14,7 +14,6 @@ Both ASR engine families want 16 kHz mono, matching SAMPLE_RATE in
 voice_ordering.py.
 """
 
-from __future__ import annotations
 
 import shutil
 import subprocess

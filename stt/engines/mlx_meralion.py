@@ -10,7 +10,6 @@ error rate belongs to MERaLiON-2-*10B*-ASR, not to this 3B model, whose
 accuracy is unpublished. Judge it on our own recordings only.
 """
 
-from __future__ import annotations
 
 import inspect
 import logging
