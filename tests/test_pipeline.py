@@ -233,3 +233,15 @@ def test_cuda_engine_falls_back_like_the_mlx_ones():
     from stt.engines import get_engine
 
     assert not get_engine("polyglot-cuda").name.endswith("-cuda")
+
+
+def test_default_engine_runs_on_every_platform():
+    # The default must not be platform-locked: a teammate on Windows should
+    # get a working, Singapore-tuned engine without setting anything.
+    from stt.engines import DEFAULT_ENGINE, REGISTRY
+
+    module, _ = REGISTRY[DEFAULT_ENGINE]
+    assert module == "whisper", (
+        f"default engine {DEFAULT_ENGINE!r} uses {module!r}, which is not "
+        "available on every platform"
+    )

@@ -35,7 +35,18 @@ REGISTRY = {
     "whisper": ("whisper", "small"),
 }
 
-DEFAULT_ENGINE = "polyglot"
+# `singlish` is the default because CTranslate2 is the only runtime that covers
+# every machine on the team — Windows CPU, Windows/Linux CUDA, Apple Silicon
+# (on CPU) and Intel Macs — while still being Singapore-tuned. Uniform
+# behaviour across the team is worth more during a hackathon than peak speed on
+# one laptop: when everyone gets the same transcript for the same clip, a bug is
+# unambiguously in our code rather than in someone's platform.
+#
+# Switch per-machine with STT_ENGINE when you want the fastest local path:
+#   polyglot       Apple Silicon (MLX)  — fastest, best measured accuracy
+#   polyglot-cuda  NVIDIA               — same model, CUDA runtime
+# Day 4's bake-off decides whether the demo should ship on one of those instead.
+DEFAULT_ENGINE = "singlish"
 FALLBACK_ENGINE = "whisper"
 
 

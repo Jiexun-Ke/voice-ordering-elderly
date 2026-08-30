@@ -304,14 +304,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--engine", default=None,
-                    help="polyglot | qwen | meralion | whisper (default: from STT_ENGINE)")
+                    help="singlish | polyglot | polyglot-cuda | qwen | meralion | whisper")
     ap.add_argument("--audio", type=Path, default=None, help="clip to test with")
     ap.add_argument("--record", action="store_true", help="record a clip from the mic")
     ap.add_argument("--skip-server", action="store_true")
     args = ap.parse_args()
 
     import os
-    engine_name = args.engine or os.environ.get("STT_ENGINE", "polyglot")
+    engine_name = args.engine or os.environ.get("STT_ENGINE", "singlish")
 
     print("=" * 72)
     print(f"STT verification — engine: {engine_name}")

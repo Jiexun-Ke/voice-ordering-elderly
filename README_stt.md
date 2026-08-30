@@ -8,42 +8,40 @@ were ported into `stt/engines/whisper.py` and its logic is left alone.
 
 ---
 
-## Quick start
+## Quick start — same on every platform
+
+The default engine is **`singlish`**: a Singapore-tuned Whisper on CTranslate2,
+which runs on Windows, Linux, Intel Macs and Apple Silicon alike. Everyone on
+the team gets identical behaviour, so a bug is never someone's platform.
 
 ```bash
-pip install -r requirements.txt
-
-# Apple Silicon — primary engine
-pip install mlx-qwen3-asr
-./scripts/convert_polyglot_mlx.sh          # timebox to ~1h, see below
+pip install -r requirements.txt ctranslate2 transformers
+python scripts/convert_singlish.py         # one-time, ~1GB
 
 uvicorn stt.server:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Windows / Linux / Intel Mac
-
-MLX is Apple-Silicon-only, but you are **not** stuck with generic Whisper.
-Build the Singapore-tuned CPU engine once:
-
-```bash
-pip install -r requirements.txt ctranslate2 transformers
-python scripts/convert_singlish.py            # ~1GB download, a few minutes
-
-STT_ENGINE=singlish uvicorn stt.server:app --host 0.0.0.0 --port 8000
-```
-
 **Python 3.12 or older is required.** `ctranslate2` publishes no wheels for
-3.13 and no source distribution, so `pip install faster-whisper` simply fails
-there. On Windows: `py -3.12 -m venv .venv`. No system ffmpeg is needed — audio
-decoding goes through PyAV, which bundles it.
+3.13 and no source distribution, so `pip install faster-whisper` fails there.
+On Windows: `py -3.12 -m venv .venv`. No system ffmpeg needed — PyAV bundles it.
 
-If you have an **NVIDIA GPU** (a gaming laptop counts), you can run the good
-model instead:
+Everything works before you run the converter: the engine falls back to generic
+`whisper-small` with a warning.
+
+### Going faster on your own machine (optional)
 
 ```bash
-pip install -U qwen-asr        # plus a CUDA-enabled torch
+# Apple Silicon — fastest and most accurate
+pip install mlx-qwen3-asr && ./scripts/convert_polyglot_mlx.sh
+STT_ENGINE=polyglot uvicorn stt.server:app
+
+# NVIDIA GPU, any OS — same model, CUDA runtime
+pip install -U qwen-asr
 STT_ENGINE=polyglot-cuda uvicorn stt.server:app
 ```
+
+Treat these as measurement options, not daily drivers. Day 4's bake-off decides
+whether the demo ships on one of them; until then, uniform beats fast.
 
 Check any of these with: `curl localhost:8000/health` — look at `engine_ready`.
 
@@ -186,7 +184,7 @@ Two layers. The first runs anywhere; the second needs a real model, which is
 why it is a script rather than a test.
 
 ```bash
-python -m pytest tests/ -q          # 51 tests, no model or network needed
+python -m pytest tests/ -q          # 52 tests, no model or network needed
 ruff check stt/ tests/ && mypy stt/ --ignore-missing-imports
 
 python scripts/verify.py --record   # everything that needs a real model
@@ -215,7 +213,7 @@ failure into a loud one.
 
 ## Status — what is and isn't verified
 
-**Verified** (51 passing tests on Linux/x86): catalogue loading and token
+**Verified** (52 passing tests on Linux/x86): catalogue loading and token
 budget, fuzzy correction including unseen ASR corruptions, order parsing with
 code-switched quantities, audio downmix/resample/guards, the full HTTP
 contract, catalogue swapping, biasing on/off, engine fallback and

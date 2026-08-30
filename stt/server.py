@@ -8,7 +8,8 @@ Run:
     uvicorn stt.server:app --reload --host 0.0.0.0 --port 8000
 
 Config (env):
-    STT_ENGINE     polyglot | qwen | meralion | whisper   (default: polyglot)
+    STT_ENGINE     singlish | polyglot | polyglot-cuda | qwen | meralion | whisper
+                   (default: singlish — runs on every platform)
     STT_MODEL      override the model id for that engine
     STT_CATALOGUE  catalogue name or path                 (default: hawker)
 """
