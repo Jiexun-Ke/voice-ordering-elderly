@@ -286,21 +286,15 @@ def check_server(engine_name: str, audio: Path) -> None:
             proc.kill()
 
 
-def record_clip(dest: Path, seconds: int = 5) -> Path | None:
+def record_clip(dest: Path) -> Path | None:
     try:
-        import sounddevice as sd
-        import soundfile as sf
+        from stt.audio import record_until_enter
     except ImportError:
         print("  need: pip install sounddevice soundfile")
         return None
-    print(f"\nRecording {seconds}s — say an order, e.g. "
-          '"two kopi-c siew dai, tapao"')
-    input("Press Enter to start...")
-    audio = sd.rec(int(seconds * 16000), samplerate=16000, channels=1, dtype="float32")
-    sd.wait()
-    sf.write(str(dest), audio, 16000)
-    print(f"Saved {dest}")
-    return dest
+    return record_until_enter(
+        dest, prompt='\nSay an order, e.g. "two kopi-c siew dai, tapao"'
+    )
 
 
 def main() -> int:

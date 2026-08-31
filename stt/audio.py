@@ -129,3 +129,51 @@ def _resample(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
 def duration_seconds(path: str | Path) -> float:
     info = sf.info(str(path))
     return info.frames / info.samplerate
+
+
+def record_until_enter(dest: str | Path, prompt: str = "") -> Path:
+    """Record from the mic until the user presses Enter.
+
+    Deliberately NOT a fixed-duration recording. Elderly speakers pause
+    mid-sentence and speak more slowly, so a timer truncates them — the exact
+    failure this project exists to avoid. voice_ordering.py made the same
+    choice for the same reason.
+
+    Push-to-talk is also what the real UI will do, so testing this way matches
+    how the system will actually be used.
+    """
+    import threading
+
+    import sounddevice as sd
+
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if prompt:
+        print(prompt)
+    input("Press Enter to START recording...")
+
+    chunks: list = []
+    stop = threading.Event()
+    stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32")
+    stream.start()
+
+    def pump():
+        while not stop.is_set():
+            data, _overflowed = stream.read(1024)
+            chunks.append(data.copy())
+
+    thread = threading.Thread(target=pump, daemon=True)
+    thread.start()
+    input("Recording... press Enter again when you have FINISHED speaking.")
+    stop.set()
+    thread.join(timeout=2.0)
+    stream.stop()
+    stream.close()
+
+    if not chunks:
+        raise AudioError("no audio captured - check microphone permissions")
+    audio = np.concatenate(chunks, axis=0).reshape(-1)
+    sf.write(str(dest), audio, SAMPLE_RATE)
+    print(f"Saved {dest}  ({len(audio) / SAMPLE_RATE:.1f}s)")
+    return dest

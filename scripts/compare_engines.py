@@ -33,23 +33,16 @@ from stt.parse import parse_order  # noqa: E402
 DEFAULT_ENGINES = "singlish,whisper,polyglot"
 
 
-def record_clip(dest: Path, seconds: float) -> Path | None:
+def record_clip(dest: Path) -> Path | None:
     try:
-        import sounddevice as sd
-        import soundfile as sf
+        from stt.audio import record_until_enter
     except ImportError:
         print("need: pip install sounddevice soundfile")
         return None
-    print(f"\nRecording {seconds:g}s.")
-    print("Try a code-switched order — that is the case in question, e.g.")
-    print('  "我要两杯 kopi, 少甜"   or   "wo yao two kopi-c siew dai, tapao"')
-    input("Press Enter to start...")
-    audio = sd.rec(int(seconds * 16000), samplerate=16000, channels=1, dtype="float32")
-    sd.wait()
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(str(dest), audio, 16000)
-    print(f"Saved {dest}\n")
-    return dest
+    return record_until_enter(dest, prompt=(
+        "\nSay a code-switched order — that is the case in question, e.g.\n"
+        '  "我要两杯 kopi, 少甜"   or   "wo yao two kopi-c siew dai, tapao"'
+    ))
 
 
 def find_collisions(resolved: list[tuple[str, str]]) -> dict[str, list[str]]:
@@ -94,7 +87,6 @@ def main() -> int:
     ap.add_argument("--engines", default=DEFAULT_ENGINES,
                     help=f"comma-separated; available: {sorted(REGISTRY)}")
     ap.add_argument("--record", action="store_true")
-    ap.add_argument("--seconds", type=float, default=6.0)
     ap.add_argument("--catalogue", default="hawker")
     ap.add_argument("--no-bias", action="store_true",
                     help="disable catalogue biasing for all engines")
@@ -102,7 +94,7 @@ def main() -> int:
 
     clips = list(args.audio)
     if args.record:
-        clip = record_clip(REPO / "data" / "eval" / "compare_clip.wav", args.seconds)
+        clip = record_clip(REPO / "data" / "eval" / "compare_clip.wav")
         if clip is None:
             return 2
         clips.insert(0, clip)

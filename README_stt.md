@@ -144,7 +144,12 @@ code-switched speech. Instead it **romanises** the Mandarin ("wo yao" ->
 extract correctly, that is fine for ordering. Whisper wrote better Chinese and
 got the order wrong.
 
-Caveats worth keeping in view: this is **one clip**, so it is indicative rather
+Note the clip was cut short by a fixed-duration recorder before the speaker
+reached "dabao", so neither engine was tested on the takeaway modifier. The
+recorder now stops on Enter instead, for the same reason voice_ordering.py did:
+elderly speakers pause mid-sentence and a timer truncates them.
+
+Other caveats: this is **one clip**, so it is indicative rather
 than conclusive — the Day 3 test set is what settles it. And both engines took
 about 2.4s, which is a noticeable wait for an elderly diner and the main
 argument for testing `polyglot` on Apple Silicon.
