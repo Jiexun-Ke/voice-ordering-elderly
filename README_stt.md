@@ -123,6 +123,38 @@ Also: `GET /health`, `GET /catalogue?name=hawker`
 
 ---
 
+## Measured: why `singlish` is the default
+
+One code-switched clip, spoken as *"wo yao two kopi-c siew dai"*, on an M4 Mac:
+
+| Engine | Transcript | Parsed order |
+|---|---|---|
+| `singlish` | `Woyao two Kopi C Siew Dai` | **2x Kopi-C (siew dai)** correct |
+| `whisper` | `我要做 kopi siu dai 蛋。` | 1x Kopi (siew dai) wrong |
+
+Plain Whisper made three errors the finetune did not: it heard "two" as 做
+(collapsing the quantity to 1), dropped the "C" from Kopi-C, and hallucinated a
+trailing 蛋.
+
+This contradicted the expectation going in. `singlish` is finetuned on a
+Singapore *English* corpus, and finetuning Whisper on English-heavy data is
+documented to damage multilingual ability, so it was expected to fail on
+code-switched speech. Instead it **romanises** the Mandarin ("wo yao" ->
+"Woyao") rather than writing characters — and since the order fields still
+extract correctly, that is fine for ordering. Whisper wrote better Chinese and
+got the order wrong.
+
+Caveats worth keeping in view: this is **one clip**, so it is indicative rather
+than conclusive — the Day 3 test set is what settles it. And both engines took
+about 2.4s, which is a noticeable wait for an elderly diner and the main
+argument for testing `polyglot` on Apple Silicon.
+
+Reproduce with:
+
+```bash
+python scripts/compare_engines.py --record --engines singlish,whisper
+```
+
 ## Choosing an engine
 
 ```bash
