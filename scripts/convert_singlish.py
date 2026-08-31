@@ -31,6 +31,37 @@ DEFAULT_MODEL = "jensenlwt/whisper-small-singlish-122k"
 DEFAULT_OUT = REPO / "models" / "singlish-ct2"
 
 
+# Whisper finetunes do not agree on which tokenizer files they ship: newer
+# exports have tokenizer.json, older ones have vocab.json + merges.txt.
+# Copying a file the repo lacks aborts the whole conversion, so ask the hub
+# what is actually there. Anything not copied is fetched by faster-whisper on
+# first load, so missing all of them is survivable, just slower.
+TOKENIZER_FILES = (
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "vocab.json",
+    "merges.txt",
+    "normalizer.json",
+    "special_tokens_map.json",
+    "preprocessor_config.json",
+)
+
+
+def _tokenizer_files(model: str) -> list[str]:
+    """Which tokenizer files this checkpoint actually has."""
+    if Path(model).is_dir():
+        return [f for f in TOKENIZER_FILES if (Path(model) / f).exists()]
+    try:
+        from huggingface_hub import list_repo_files
+
+        available = set(list_repo_files(model))
+    except Exception as exc:  # offline, private repo, hub API change
+        print(f"  (could not list repo files: {exc}; letting faster-whisper "
+              "fetch the tokenizer at load time)")
+        return []
+    return [f for f in TOKENIZER_FILES if f in available]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -86,8 +117,10 @@ def main() -> int:
         "--model", args.model,
         "--output_dir", str(args.output_dir),
         "--quantization", args.quantization,
-        "--copy_files", "tokenizer.json", "preprocessor_config.json",
     ]
+    copyable = _tokenizer_files(args.model)
+    if copyable:
+        cmd += ["--copy_files", *copyable]
 
     print(f"Converting {args.model}\n         -> {args.output_dir} ({args.quantization})")
     print("This downloads ~1GB and takes a few minutes.\n")

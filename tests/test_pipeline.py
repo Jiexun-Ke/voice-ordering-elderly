@@ -312,3 +312,29 @@ def test_collision_detection_catches_a_void_comparison():
         [("singlish", "whisper-singlish-ct2"), ("whisper", "whisper-small")]
     )
     assert distinct == {}
+
+
+def test_converter_only_copies_tokenizer_files_that_exist(tmp_path):
+    """Copying a file the checkpoint lacks aborts the whole conversion.
+
+    Whisper finetunes disagree on which tokenizer files they ship — newer
+    exports have tokenizer.json, older ones vocab.json + merges.txt — so
+    hardcoding the list fails on roughly half of them.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "convert_singlish", "scripts/convert_singlish.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    # A local checkpoint with only the older-style files.
+    (tmp_path / "vocab.json").write_text("{}")
+    (tmp_path / "merges.txt").write_text("")
+    found = module._tokenizer_files(str(tmp_path))
+    assert set(found) == {"vocab.json", "merges.txt"}
+    assert "tokenizer.json" not in found
+
+    # An empty checkpoint yields nothing rather than raising.
+    assert module._tokenizer_files(str(tmp_path / "empty")) == []
