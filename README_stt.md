@@ -281,19 +281,101 @@ failure into a loud one.
 
 ## Status — what is and isn't verified
 
-**Verified** (52 passing tests on Linux/x86): catalogue loading and token
-budget, fuzzy correction including unseen ASR corruptions, order parsing with
-code-switched quantities, audio downmix/resample/guards, the full HTTP
-contract, catalogue swapping, biasing on/off, engine fallback and
+**Verified on a real machine** (M4 Mac, Python 3.12): 63 tests pass, the
+`singlish` engine transcribes real speech, and a spoken order becomes correct
+structured JSON end to end. `ruff` and `mypy` are clean.
+
+**Verified without a model** (any platform, no download): catalogue loading and
+the biasing token budget, fuzzy correction including unseen ASR corruptions,
+order parsing with code-switched quantities, audio downmix/resample/guards, the
+full HTTP contract, catalogue swapping, biasing on/off, engine fallback and
 readiness reporting, and the eval harness.
 
-**Not verified — needs a smoke test on Apple Silicon:** the MLX engines
-(`polyglot`, `qwen`, `meralion`). They were written on an x86 Linux container
-where MLX cannot install. In particular the biasing keyword is detected by
-introspection at load time because the two MLX wrapper packages differ; if a
-wrapper takes it under a different name, `stt/engines/mlx_qwen.py` logs a
-warning and continues without biasing. **First thing to check on the Mac:**
-that `/transcribe` logs no "exposes no biasing kwarg" warning.
+**Not yet run by anyone:** the MLX engines (`polyglot`, `qwen`, `meralion`) and
+the CUDA engine (`polyglot-cuda`). They are written and behind the same
+interface, but no one has executed them. First thing to check when you do: that
+`/transcribe` logs no `"exposes no biasing kwarg"` warning — if it does,
+catalogue biasing is silently off and accuracy rests on `correct.py` alone.
 
-The Whisper engine is also unexercised against a real model here (no download),
-though its parameters are a direct port from the working prototype.
+## What to do next
+
+In priority order. The first is a hard gate on everything else.
+
+### 1. Record the test set (nobody can skip this)
+
+`data/eval/refs.csv` currently holds three placeholder rows. Until it holds real
+recordings, **no question about which engine is better can be answered** — the
+comparison below rests on two clips from one speaker, which is indicative and
+nothing more.
+
+Target 40-60 utterances. Record through the real browser capture path so the
+eval audio matches production audio. Tag them:
+
+| Tag | What it covers | Why it matters |
+|---|---|---|
+| `codeswitch` | mixing English with Mandarin/Malay | where engines diverge most |
+| `dialect` | Hokkien, Teochew, Cantonese | **untested on every engine** |
+| `elderly` | slow speech, mid-sentence pauses | the actual user |
+| *(blank)* | ordinary English orders | the baseline |
+
+About an hour of work. Then:
+
+```bash
+python -m stt.eval data/eval --engines singlish,whisper,polyglot
+```
+
+### 2. Curate the real menu
+
+`data/catalogues/hawker.json` is invented. Replace it with the real one,
+including every way a diner might say each item. Feeds both the biasing prompt
+and the fuzzy matcher, so it improves accuracy twice. No coding.
+
+### 3. Latency
+
+Both CPU engines take ~2.6s per order. For an elderly diner that is a
+noticeable wait, and it is the weakest part of the demo. The obvious experiment
+is `polyglot` on Apple Silicon:
+
+```bash
+pip install mlx-qwen3-asr
+./scripts/convert_polyglot_mlx.sh          # timebox to ~1 hour
+python scripts/compare_engines.py --record --engines singlish,polyglot
+```
+
+If the conversion fails, run `--engines singlish,qwen` instead — base Qwen3-ASR
+needs no conversion and shares the same code path.
+
+### 4. Dialects — an open question worth answering
+
+Nothing here has been tested on Hokkien or Teochew, and elderly diners are the
+group most likely to use them. Polyglot-Lion was trained on four languages and
+explicitly **not** on dialects; base Qwen3-ASR advertises Cantonese and Minnan;
+MERaLiON claims Hokkien. Whether any of that survives in practice is
+unpublished, so the `dialect` subset in step 1 answers something nobody has
+written down. That is pitch material.
+
+### 5. Tune the correction thresholds
+
+`stt/correct.py` uses a fuzzy threshold of 82, and `stt/parse.py` uses 85 for
+quantities with a 3-character minimum. Both were set against synthetic examples,
+not real audio. Re-tune once the test set exists — this is where menu accuracy
+is actually won.
+
+## A note on what testing already caught
+
+Real testing on real hardware found five bugs that unit tests and reasoning did
+not. Worth remembering when deciding how much to trust the untested engines:
+
+- A missing PyTorch dependency, surfacing as a bare `NameError` from inside
+  ctranslate2
+- A hardcoded `tokenizer.json` that aborted conversion for any checkpoint using
+  the older `vocab.json` + `merges.txt` layout
+- A comparison tool that silently compared one model against itself and printed
+  identical lines that read as agreement
+- Quantity matching so strict that "two" heard as "do" became 1x
+- A fixed six-second recorder that truncated the speaker mid-order — in a
+  project whose entire premise is that elderly speakers pause and need longer
+
+The expectation that `singlish` would fail on code-switched speech was also
+wrong, and only measurement showed it. Assume the same about anything else in
+this README that has not been run.
