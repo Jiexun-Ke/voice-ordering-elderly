@@ -52,6 +52,20 @@ def record_clip(dest: Path, seconds: float) -> Path | None:
     return dest
 
 
+def find_collisions(resolved: list[tuple[str, str]]) -> dict[str, list[str]]:
+    """Map model name -> requested engines, for any model requested twice.
+
+    An engine whose checkpoint is missing falls back to generic whisper. If two
+    requested engines both fall back, the comparison silently becomes one model
+    against itself — identical output that reads like the models agreeing
+    rather than like a broken test.
+    """
+    by_model: dict[str, list[str]] = {}
+    for requested, model in resolved:
+        by_model.setdefault(model, []).append(requested)
+    return {model: names for model, names in by_model.items() if len(names) > 1}
+
+
 def load_engines(names: list[str]) -> list:
     engines = []
     for name in names:
@@ -108,6 +122,21 @@ def main() -> int:
     cat = load_catalogue(args.catalogue)
     print("Loading engines (first load downloads weights and is slow):")
     engines = load_engines(names)
+
+    collisions = find_collisions([(n, e.name) for n, e in engines])
+    if collisions:
+        print("\n" + "=" * 74)
+        print("COMPARISON INVALID — these engines resolved to the same model:")
+        for model, requested in collisions.items():
+            print(f"  {', '.join(requested)}  ->  {model}")
+        print("\nAn engine falls back to generic whisper when its checkpoint is")
+        print("missing, so you would be comparing one model against itself.")
+        print("\nMost likely: the conversion has not succeeded yet. Run")
+        print("  pip install torch && python scripts/convert_singlish.py")
+        print("and check it prints 'Done.' before comparing again.")
+        print("=" * 74)
+        return 1
+
     if not engines:
         print("\nNo engines available on this machine. On Windows/Linux try:\n"
               "  python scripts/convert_singlish.py && "

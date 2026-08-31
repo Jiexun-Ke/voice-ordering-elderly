@@ -286,3 +286,29 @@ def test_model_weights_stay_inside_the_repo():
     import stt
 
     assert Path(os.environ["HF_HOME"]).is_relative_to(stt.REPO_ROOT)
+
+
+def test_collision_detection_catches_a_void_comparison():
+    """Two engines resolving to one model makes the comparison meaningless.
+
+    This happens for real: `singlish` falls back to generic whisper until the
+    conversion has run, so `--engines singlish,whisper` compares whisper-small
+    against itself and prints two identical lines that look like agreement.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "compare_engines", "scripts/compare_engines.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    collided = module.find_collisions(
+        [("singlish", "whisper-small"), ("whisper", "whisper-small")]
+    )
+    assert collided == {"whisper-small": ["singlish", "whisper"]}
+
+    distinct = module.find_collisions(
+        [("singlish", "whisper-singlish-ct2"), ("whisper", "whisper-small")]
+    )
+    assert distinct == {}
