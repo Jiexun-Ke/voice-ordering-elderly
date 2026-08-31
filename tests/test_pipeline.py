@@ -245,3 +245,29 @@ def test_default_engine_runs_on_every_platform():
         f"default engine {DEFAULT_ENGINE!r} uses {module!r}, which is not "
         "available on every platform"
     )
+
+
+@pytest.mark.parametrize("spoken,expected", [
+    ("two kopi", 2),        # exact
+    ("2 kopi", 2),          # digit
+    ("tree teh o", 3),      # common mishearing of "three"
+    ("dua kopi", 2),        # Malay, exact
+    ("kopi", 1),            # no quantity at all
+])
+def test_quantity_survives_asr_errors(hawker, spoken, expected):
+    from stt.parse import parse_order
+
+    assert parse_order(spoken, hawker).lines[0].quantity == expected
+
+
+@pytest.mark.parametrize("spoken", ["do kopi", "tu kopi", "an kopi"])
+def test_short_garbled_words_do_not_become_quantities(hawker, spoken):
+    """Words under 3 characters are never fuzzy-matched to a number.
+
+    "do" and "tu" are each one edit from "two". Guessing would silently double
+    an order, and a diner is far less likely to notice a wrong quantity than a
+    wrong dish. Defaulting to 1 leaves it for the confirmation step instead.
+    """
+    from stt.parse import parse_order
+
+    assert parse_order(spoken, hawker).lines[0].quantity == 1

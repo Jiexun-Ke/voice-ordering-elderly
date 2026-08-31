@@ -14,6 +14,8 @@ than what is easiest to implement:
 
 from dataclasses import dataclass, field
 
+from rapidfuzz import fuzz
+
 from .catalogue import Catalogue
 from .correct import Match, correct, normalize
 
@@ -94,8 +96,21 @@ class Order:
         return summary + (" — takeaway" if self.takeaway else "")
 
 
+# Number words are short, so fuzzy matching them is riskier than matching dish
+# names: "si"/"six" and "a"/"an" are one edit apart. Require a high similarity
+# and at least three characters, which lets "do"->"two" fail safely while
+# "tree"->"three" and "tu"->"two" still resolve.
+QUANTITY_FUZZ_THRESHOLD = 85
+MIN_FUZZY_QUANTITY_LEN = 3
+
+
 def _quantity_before(tokens: list[str], index: int) -> int:
-    """Look one token back for a number word or digit."""
+    """Look one token back for a number word or digit.
+
+    Falls back to fuzzy matching because a misheard quantity is worse than a
+    misheard dish: a diner notices the wrong item immediately, but not that
+    they were charged for one kopi instead of two.
+    """
     if index <= 0:
         return 1
     token = tokens[index - 1]
@@ -103,6 +118,17 @@ def _quantity_before(tokens: list[str], index: int) -> int:
         return NUMBER_WORDS[token]
     if token.isdigit():
         return max(1, int(token))
+
+    if len(token) >= MIN_FUZZY_QUANTITY_LEN:
+        best_word, best_score = None, 0.0
+        for word in NUMBER_WORDS:
+            if len(word) < MIN_FUZZY_QUANTITY_LEN:
+                continue
+            score = fuzz.ratio(token, word)
+            if score > best_score:
+                best_word, best_score = word, score
+        if best_word and best_score >= QUANTITY_FUZZ_THRESHOLD:
+            return NUMBER_WORDS[best_word]
     return 1
 
 
