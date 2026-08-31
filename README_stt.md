@@ -15,7 +15,7 @@ which runs on Windows, Linux, Intel Macs and Apple Silicon alike. Everyone on
 the team gets identical behaviour, so a bug is never someone's platform.
 
 ```bash
-pip install -r requirements.txt ctranslate2 transformers
+pip install -r requirements.txt ctranslate2 transformers torch
 python scripts/convert_singlish.py         # one-time, ~1GB
 
 uvicorn stt.server:app --reload --host 0.0.0.0 --port 8000

@@ -56,6 +56,19 @@ def main() -> int:
             return 0
         shutil.rmtree(args.output_dir)
 
+    # ct2-transformers-converter loads the HF checkpoint with PyTorch before
+    # converting it. Without torch it fails with a bare `NameError: name
+    # 'torch' is not defined` from inside ctranslate2, which says nothing
+    # useful. Torch is needed only for this one-time conversion, never at
+    # runtime, which is why it is not in requirements.txt.
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        print("ERROR: PyTorch is required for the conversion (not at runtime).\n"
+              "       pip install torch\n"
+              "       Then re-run this script.")
+        return 2
+
     converter = shutil.which("ct2-transformers-converter")
     cmd = (
         [converter] if converter
