@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+import stt  # noqa: E402,F401  - sets HF_HOME so weights land inside the repo
 
 # Reported WER 9.69, finetuned on IMDA's National Speech Corpus. The mjwong
 # checkpoints are reasonable alternatives if this one disappoints on your clips.

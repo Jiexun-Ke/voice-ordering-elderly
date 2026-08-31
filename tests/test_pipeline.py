@@ -271,3 +271,18 @@ def test_short_garbled_words_do_not_become_quantities(hawker, spoken):
     from stt.parse import parse_order
 
     assert parse_order(spoken, hawker).lines[0].quantity == 1
+
+
+def test_model_weights_stay_inside_the_repo():
+    """The project must be one movable folder.
+
+    Model downloads default to ~/.cache/huggingface, which would be left
+    behind when the repo is copied to another drive — the service would then
+    silently re-download ~1GB, or fail offline.
+    """
+    import os
+    from pathlib import Path
+
+    import stt
+
+    assert Path(os.environ["HF_HOME"]).is_relative_to(stt.REPO_ROOT)

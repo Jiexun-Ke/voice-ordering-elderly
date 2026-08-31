@@ -54,6 +54,35 @@ Check any of these with: `curl localhost:8000/health` — look at `engine_ready`
 
 ---
 
+## Where everything lives
+
+The whole project is one folder. Copy it to another drive and it still works —
+model weights included.
+
+```
+voice-ordering-elderly/
+├── stt/                    the service
+├── scripts/                setup and testing commands
+├── data/
+│   ├── catalogues/         merchant menus (edit these)
+│   └── eval/               your recorded test clips + refs.csv
+├── models/                 all downloaded weights (gitignored)
+│   ├── singlish-ct2/       the converted engine
+│   └── hf-cache/           HuggingFace downloads, pinned here not to ~/.cache
+└── .venv/                  Python environment
+```
+
+**One caveat when you move drives:** `.venv` stores absolute paths internally,
+so recreate it at the new location. Everything else moves as-is:
+
+```bash
+rm -rf .venv
+/opt/homebrew/bin/python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt ctranslate2 transformers sounddevice
+```
+
+Weights in `models/` survive, so there is no second ~1GB download.
+
 ## API contract
 
 Frozen on Day 1. Build against this before the model is finalised.
