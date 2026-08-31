@@ -125,34 +125,29 @@ Also: `GET /health`, `GET /catalogue?name=hawker`
 
 ## Measured: why `singlish` is the default
 
-One code-switched clip, spoken as *"wo yao two kopi-c siew dai"*, on an M4 Mac:
+Two clips of *"wo yao two kopi-c siew dai, da bao"* on an M4 Mac:
 
 | Engine | Transcript | Parsed order |
 |---|---|---|
-| `singlish` | `Woyao two Kopi C Siew Dai` | **2x Kopi-C (siew dai)** correct |
-| `whisper` | `我要做 kopi siu dai 蛋。` | 1x Kopi (siew dai) wrong |
+| `singlish` | `Oh Yaw two Kopi C Siew Dai, Da Bao` | **2x Kopi-C (siew dai) — takeaway** all correct |
+| `whisper` | `我要 do kopi siu dai, da bao.` | 1x Kopi (siew dai) — takeaway, two errors |
 
-Plain Whisper made three errors the finetune did not: it heard "two" as 做
-(collapsing the quantity to 1), dropped the "C" from Kopi-C, and hallucinated a
-trailing 蛋.
+Plain Whisper made the same two mistakes on both clips: it heard "two" as
+"do"/做 and collapsed the quantity to 1, and dropped the "C" so Kopi-C matched
+plain Kopi. On the first clip it also hallucinated a trailing 蛋.
 
 This contradicted the expectation going in. `singlish` is finetuned on a
 Singapore *English* corpus, and finetuning Whisper on English-heavy data is
 documented to damage multilingual ability, so it was expected to fail on
 code-switched speech. Instead it **romanises** the Mandarin ("wo yao" ->
-"Woyao") rather than writing characters — and since the order fields still
-extract correctly, that is fine for ordering. Whisper wrote better Chinese and
-got the order wrong.
+"Oh Yaw" / "Woyao" — inconsistently, but it is not a menu term so nothing
+downstream cares) and every order field comes out right. Whisper wrote better
+Chinese and produced a worse order.
 
-Note the clip was cut short by a fixed-duration recorder before the speaker
-reached "dabao", so neither engine was tested on the takeaway modifier. The
-recorder now stops on Enter instead, for the same reason voice_ordering.py did:
-elderly speakers pause mid-sentence and a timer truncates them.
-
-Other caveats: this is **one clip**, so it is indicative rather
-than conclusive — the Day 3 test set is what settles it. And both engines took
-about 2.4s, which is a noticeable wait for an elderly diner and the main
-argument for testing `polyglot` on Apple Silicon.
+Caveats: two clips from one speaker is indicative, not conclusive — the Day 3
+test set is what settles it. And both engines take ~2.6s on CPU, which is a
+noticeable wait for an elderly diner and the main argument for testing
+`polyglot` on Apple Silicon.
 
 Reproduce with:
 
