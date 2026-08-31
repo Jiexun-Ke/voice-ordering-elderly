@@ -1,0 +1,13 @@
+filename,reference,tag
+# Day 3 gate: replace these rows with real recordings.
+# - filename : a .wav in this folder, recorded through the real browser path
+# - reference: exactly what was said, lowercase, no punctuation needed
+# - tag      : free-form; "dialect", "elderly", "codeswitch" are broken out
+#              separately in the eval table. Use "codeswitch" for clips
+#              mixing languages and "dialect" for Hokkien/Teochew/Cantonese
+#              — those are the subsets where engines differ most.
+# Target ~40-60 rows. Delete these comment lines before running.
+example_01.wav,two kopi c siew dai tapao,elderly
+example_02.wav,one char kway teow extra chilli,
+example_03.wav,three teh o kosong,elderly
+example_04.wav,wo yao two kopi c siew dai,codeswitch

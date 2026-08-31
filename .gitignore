@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- STT service ---
+# Model weights: multi-GB, never commit
+models/
+# Recorded eval audio
+*.wav
