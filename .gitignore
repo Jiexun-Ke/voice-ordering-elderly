@@ -222,3 +222,7 @@ __marimo__/
 models/
 # Recorded eval audio
 *.wav
+
+# --- Backend / order-matching service ---
+# Per-table session state — runtime data, not source.
+backend/table_sessions.json
