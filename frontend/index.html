@@ -15,6 +15,7 @@
     <title>Menu helper — Open your menu</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/ordering.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
@@ -28,6 +29,16 @@
       <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
       <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2l-1.5 1v2M12 17h.01"/></symbol>
+      <symbol id="i-cart" viewBox="0 0 24 24"><path d="M2 3h3l3 13h11l3-9H6M9 20h.01M18 20h.01"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 1 1 19 0Z"/><path d="M7 10h9M7 14h6"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></symbol>
+      <symbol id="i-cup" viewBox="0 0 24 24"><path d="M4 8h13v7a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zM17 8h2a3 3 0 0 1 0 6h-2M2 23h18M7 2v2M12 2v2"/></symbol>
+      <symbol id="i-food" viewBox="0 0 24 24"><path d="M3 3v5a3 3 0 0 0 6 0V3M6 3v18M18 3c-3 2-4 6-4 10h4M18 3v18"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24"><path d="m15 5 4 4M4 20l5-1L21 7a2.8 2.8 0 0 0-4-4L5 15z"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></symbol>
     </svg>
     <a class="skip-link" href="#main" data-t="skip">Skip to menu options</a>
     <header class="site-header">
@@ -37,7 +48,7 @@
         <button class="language-button" data-language="zh" lang="zh-Hans" aria-pressed="false">中文</button>
       </div>
     </header>
-    <main id="main" class="main-content">
+    <main id="main" class="main-content" tabindex="-1">
       <div class="intro">
         <span class="eyebrow"><span class="step-dot">1</span><span data-t="step">LET’S GET STARTED</span></span>
         <h1 data-t="headline">Let’s read <br />your menu.</h1>
@@ -52,6 +63,7 @@
       <button class="sample-button" data-open="sample"><svg class="icon"><use href="#i-menu"/></svg><span data-t="sample">Try a sample menu</span><svg class="icon"><use href="#i-arrow"/></svg></button>
       <p class="reassurance"><svg class="icon"><use href="#i-check"/></svg><span data-t="reassurance">Take your time. We’ll go one step at a time.</span></p>
     </main>
+    <main id="ordering-screen" class="ordering-screen" hidden></main>
     <footer class="site-footer"><span data-t="footer">A little easier. A little more independent.</span><button id="help-button"><svg class="icon"><use href="#i-help"/></svg><span data-t="help">Need a hand?</span></button></footer>
     <dialog id="menu-dialog" aria-labelledby="dialog-title"><div class="dialog-header"><span class="dialog-kicker" data-t="brand">Menu helper</span><button class="close-button" id="close-dialog" aria-label="Close" data-label="close"><svg class="icon"><use href="#i-close"/></svg></button></div><div id="dialog-content"></div></dialog>
   </body>

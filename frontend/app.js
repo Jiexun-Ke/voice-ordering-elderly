@@ -1,3 +1,5 @@
+import { createOrdering } from './ordering.js';
+
 const copy = {
   en: {
     skip: 'Skip to menu options', brand: 'Menu helper', step: 'LET’S GET STARTED', headline: 'Let’s read <br />your menu.',
@@ -53,12 +55,12 @@ let scanTimer = null;
 let photoUrl = null;
 let activePanel = null;
 let panelVersion = 0;
-let menu = null;
 const t = key => copy[language][key];
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const title = key => `<h2 id="dialog-title" tabindex="-1">${t(key)}</h2>`;
 const sampleButton = () => `<button class="secondary-button" data-open="sample">${icon('menu')}${t('sample')}</button>`;
+const ordering = createOrdering({ onHome: () => { document.querySelector('.sample-button')?.focus(); } });
 function setLanguage(next) {
   language = next;
   document.documentElement.lang = next === 'zh' ? 'zh-Hans' : 'en';
@@ -68,6 +70,7 @@ function setLanguage(next) {
   document.querySelector('.brand').setAttribute('aria-label', t('brand'));
   document.querySelectorAll('[data-language]').forEach(el => { const active = el.dataset.language === next; el.classList.toggle('is-active', active); el.setAttribute('aria-pressed', String(active)); });
   try { localStorage.setItem('menu-helper-language', next); } catch { /* Continue without saving. */ }
+  ordering.setLanguage(next);
 }
 function cleanup() {
   panelVersion++;
@@ -80,6 +83,11 @@ function cleanup() {
 }
 function showPanel(panel) {
   cleanup();
+  if (panel === 'sample') {
+    if (dialog.open) dialog.close();
+    activePanel = null;
+    return ordering.open(language);
+  }
   activePanel = panel;
   let ready;
   if (panel === 'link') {
@@ -92,31 +100,12 @@ function showPanel(panel) {
       document.querySelector('#camera-status').textContent = t('cameraFallback');
       document.querySelector('#start-camera').hidden = true;
     }
-  } else if (panel === 'sample') {
-    content.innerHTML = `<span class="sample-label">${t('sampleBadge')}</span>${title('sampleTitle')}<p>${t('sampleIntro')}</p><div id="sample-items" aria-live="polite"><p>${t('loading')}</p></div><p class="notice">${t('sampleNote')}</p><button class="primary-button" data-close>${t('back')}</button>`;
-    ready = loadSample(panelVersion);
   } else if (panel === 'help') {
     content.innerHTML = `${title('helpTitle')}<p>${t('helpIntro')}</p><ol class="help-steps">${t('helpSteps').map(step => `<li>${step}</li>`).join('')}</ol><button class="primary-button" id="read-help">${icon('sound')}<span>${t('listen')}</span></button><p id="speech-status" role="status"></p>${sampleButton()}`;
   }
   if (!dialog.open) dialog.showModal();
   document.querySelector('#dialog-title')?.focus();
   return ready;
-}
-async function loadSample(version) {
-  try {
-    if (!menu) {
-      const response = await fetch('/sample-menu.json');
-      if (!response.ok) throw new Error('Menu unavailable');
-      const result = await response.json();
-      if (!Array.isArray(result.items) || !result.items.every(item => typeof item.display === 'string' && Number.isFinite(item.price))) throw new Error('Invalid menu');
-      menu = result;
-    }
-    if (version !== panelVersion) return;
-    document.querySelector('#sample-items').innerHTML = `<div class="menu-list">${menu.items.map(item => `<div class="menu-item"><strong>${escape(item.display)}</strong><strong class="price">$${item.price.toFixed(2)}</strong></div>`).join('')}</div>`;
-  } catch {
-    if (version !== panelVersion) return;
-    document.querySelector('#sample-items').innerHTML = `<p class="error">${t('loadError')}</p><button class="secondary-button" data-open="sample">${t('retry')}</button>`;
-  }
 }
 function parseMenuUrl(value) {
   const url = new URL(value.trim());
@@ -169,7 +158,7 @@ async function startCamera() {
 }
 document.addEventListener('click', event => {
   const open = event.target.closest('[data-open]');
-  if (open) showPanel(open.dataset.open);
+  if (open) Promise.resolve(showPanel(open.dataset.open)).catch(() => {});
   const lang = event.target.closest('[data-language]');
   if (lang) setLanguage(lang.dataset.language);
   if (event.target.closest('[data-close], #close-dialog')) dialog.close();
@@ -212,6 +201,19 @@ dialog.addEventListener('click', event => { if (event.target === dialog) { const
 window.addEventListener('pagehide', cleanup);
 document.addEventListener('visibilitychange', () => { if (document.hidden && activePanel === 'scan') dialog.close(); });
 setLanguage(language);
+window.addEventListener('popstate', () => {
+  if (['menu','chat','order'].includes(location.hash.slice(1))) ordering.open(language, { fromHistory:true }).catch(() => {});
+  else ordering.hide();
+});
+document.querySelector('.brand').addEventListener('click', event => {
+  if (ordering.active) { event.preventDefault(); ordering.hide(); history.pushState({}, '', '/'); }
+});
+if (['menu','chat','order'].includes(location.hash.slice(1))) ordering.open(language, { fromHistory:true }).catch(() => {});
+document.querySelector('.skip-link').addEventListener('click', event => {
+  event.preventDefault();
+  const target = ordering.active ? document.querySelector('#ordering-screen [role="tabpanel"]:not([hidden])') : document.querySelector('#main');
+  target?.focus();
+});
 
 // Optional browser agent access uses the same visible sample-menu journey.
 if (document.modelContext?.registerTool) {
@@ -226,8 +228,7 @@ if (document.modelContext?.registerTool) {
         if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'language') || (input.language !== undefined && !['en', 'zh'].includes(input.language))) throw new Error('Use language en or zh.');
         if (input.language) setLanguage(input.language);
         await showPanel('sample');
-        if (!menu) throw new Error('Sample menu unavailable.');
-        return { opened: true, merchant: menu.merchant, itemCount: menu.items.length, language };
+        return { opened: true, ...ordering.snapshot(), language };
       },
     })).catch(() => {});
   } catch { /* Browsers without WebMCP use the normal buttons. */ }
