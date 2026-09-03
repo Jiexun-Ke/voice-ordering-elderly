@@ -5,14 +5,14 @@ Our Minimal viable product for the Agentic AI Hackathon - Developing a speech-ba
 
 ## Where the project is now
 
-The **speech-to-text and order-parsing pipeline is built and working**. A diner
-can speak an order and get back structured JSON. What is *not* built yet: the
-frontend, the backend/order system, and the confirmation flow.
+The website now connects **Menu / Chat / Order** to the local speech and ordering backends. Microphone recordings go to `POST /transcribe`; after the diner reviews the transcript and presses Send, the existing dialogue manager handles the message and updates the shared server order. Menu buttons, quantities, preferences and confirmation also use the ordering API. Kitchen submission remains a local mock. Photo/link menu analysis and AI translation are future work.
 
 ```
-[phone browser]  ->  POST /transcribe  ->  [STT service]  ->  order JSON  ->  [backend]
-   not built yet         WORKING            WORKING                            not built yet
+[Menu / Chat / Order] -> frontend API proxy -> [STT :8000] + [Ordering :8001]
+                                             local model    dialogue + mock kitchen
 ```
+
+See [frontend setup](frontend/README.md#start-the-connected-website) for the three local processes required to try the connected website.
 
 Measured on an M4 Mac, speaking *"wo yao two kopi-c siew dai, da bao"*:
 
@@ -23,6 +23,9 @@ order : 2x Kopi-C (siew dai) — takeaway        every field correct, ~2.6s
 
 ## Start here
 
+- **Frontend:** start the speech and ordering services using the setup above, then run `cd frontend` and `npm run dev`, and open
+  [localhost:5173](http://localhost:5173). No package installation is needed.
+  See [`frontend/README.md`](frontend/README.md) for the available interactions.
 - **Running it / API contract:** [`README_stt.md`](README_stt.md)
 - **Picking up a task:** [Extension points](README_stt.md#extension-points-for-other-teammates)
 - **The original CLI prototype:** `voice_ordering.py` (unchanged, still works)

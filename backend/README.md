@@ -25,6 +25,20 @@ two other pieces of the system and owns everything in the middle:
   - tracks each line: received -> preparing -> done
 ```
 
+## Web API
+
+The website uses `server.py` as a small HTTP adapter around the existing dialogue manager, menu, order models and mock kitchen. From the repository root:
+
+```bash
+.venv/bin/python -m uvicorn backend.server:app --host 127.0.0.1 --port 8001
+```
+
+The frontend server proxies `/api/order/*` to this service and `/api/stt/*` to the separate STT service on port 8000. The browser uses the ordering menu's 12 items and server-calculated prices. Sessions are isolated and held in memory; restarting this web API clears its demo sessions. The CLI's file-backed table sessions remain separate.
+
+Routes: `GET /health`, `GET /menu`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, `POST /sessions/{id}/lines`, `PATCH` or `DELETE /sessions/{id}/lines/{line_id}`, and `POST /sessions/{id}/confirm`. All order-changing requests include a UUID `request_id` for idempotent retries. The response includes a complete cart snapshot and conversation. Only confirmed orders reach the existing mock kitchen. See `/docs` on port 8001 for request schemas.
+
+This is a local development API bound to loopback, with no public authentication or production persistence. Full startup and test instructions are in [the frontend README](../frontend/README.md).
+
 ## Running it
 
 ```bash
