@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#145954" />
+    <meta name="description" content="A little help with your next meal. Open a menu with a QR code, photo, or link, or explore a sample hawker menu." />
+    <meta property="og:title" content="Menu helper" />
+    <meta property="og:description" content="A little help with your next meal." />
+    <meta property="og:image" content="/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Menu helper" />
+    <meta name="twitter:description" content="A little help with your next meal." />
+    <meta name="twitter:image" content="/og.png" />
+    <title>Menu helper — Open your menu</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 4.5h6a3 3 0 0 1 2 1 3 3 0 0 1 2-1h6v15h-6a3 3 0 0 0-2 1 3 3 0 0 0-2-1H4zM12 5.5v15M7 9h2M15 9h2M7 13h2M15 13h2"/></symbol>
+      <symbol id="i-qr" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx=".6"/><rect x="15" y="3" width="6" height="6" rx=".6"/><rect x="3" y="15" width="6" height="6" rx=".6"/><path d="M15 15h3v3h3v3h-6v-3M21 12v3M12 3v3M3 12h3M12 9v6M9 12h6M12 21v-3"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="m8 5 1.5-2h5L16 5h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><circle cx="12" cy="13" r="4"/><path d="M18 8h.01"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 13 4-4M8 16l-1 1a4.2 4.2 0 0 1-6-6l5-5a4.2 4.2 0 0 1 6 0M16 8l1-1a4.2 4.2 0 0 1 6 6l-5 5a4.2 4.2 0 0 1-6 0" transform="translate(1 1) scale(.9)"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+      <symbol id="i-sound" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5zM15 8a6 6 0 0 1 0 8M18 4a11 11 0 0 1 0 16"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2l-1.5 1v2M12 17h.01"/></symbol>
+    </svg>
+    <a class="skip-link" href="#main" data-t="skip">Skip to menu options</a>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Menu helper home"><span class="brand-icon"><svg class="icon"><use href="#i-menu"/></svg></span><span data-t="brand">Menu helper</span></a>
+      <div class="language-switch" role="group" aria-label="Language / 语言">
+        <button class="language-button is-active" data-language="en" lang="en" aria-pressed="true">English</button>
+        <button class="language-button" data-language="zh" lang="zh-Hans" aria-pressed="false">中文</button>
+      </div>
+    </header>
+    <main id="main" class="main-content">
+      <div class="intro">
+        <span class="eyebrow"><span class="step-dot">1</span><span data-t="step">LET’S GET STARTED</span></span>
+        <h1 data-t="headline">Let’s read <br />your menu.</h1>
+        <p class="intro-copy" data-t="intro">A little help with your next meal.<br />Choose how you’d like to open your menu.</p>
+      </div>
+      <section class="menu-options" aria-label="Open a menu" data-label="options">
+        <button class="option-card" data-open="scan"><span class="option-icon"><svg class="icon"><use href="#i-qr"/></svg></span><span class="option-copy"><strong data-t="scan">Scan QR code</strong><span data-t="scanHint">Use the code on your table</span></span><svg class="icon option-arrow"><use href="#i-arrow"/></svg></button>
+        <button class="option-card" data-open="photo"><span class="option-icon"><svg class="icon"><use href="#i-camera"/></svg></span><span class="option-copy"><strong data-t="photo">Take menu photo</strong><span data-t="photoHint">Take a picture or choose a photo</span></span><svg class="icon option-arrow"><use href="#i-arrow"/></svg></button>
+        <button class="option-card" data-open="link"><span class="option-icon"><svg class="icon"><use href="#i-link"/></svg></span><span class="option-copy"><strong data-t="link">Paste menu link</strong><span data-t="linkHint">Already have a link? Add it here</span></span><svg class="icon option-arrow"><use href="#i-arrow"/></svg></button>
+      </section>
+      <div class="sample-divider"><span></span><p data-t="noMenu">Don’t have a menu handy?</p><span></span></div>
+      <button class="sample-button" data-open="sample"><svg class="icon"><use href="#i-menu"/></svg><span data-t="sample">Try a sample menu</span><svg class="icon"><use href="#i-arrow"/></svg></button>
+      <p class="reassurance"><svg class="icon"><use href="#i-check"/></svg><span data-t="reassurance">Take your time. We’ll go one step at a time.</span></p>
+    </main>
+    <footer class="site-footer"><span data-t="footer">A little easier. A little more independent.</span><button id="help-button"><svg class="icon"><use href="#i-help"/></svg><span data-t="help">Need a hand?</span></button></footer>
+    <dialog id="menu-dialog" aria-labelledby="dialog-title"><div class="dialog-header"><span class="dialog-kicker" data-t="brand">Menu helper</span><button class="close-button" id="close-dialog" aria-label="Close" data-label="close"><svg class="icon"><use href="#i-close"/></svg></button></div><div id="dialog-content"></div></dialog>
+  </body>
+</html>
