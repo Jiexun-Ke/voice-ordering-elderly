@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .app.dialogue_manager import DialogueManager
+from .app.kitchen_interface import cancel_line
 from .app.menu_data import MENU
 from .app.models import DraftLine
 from .app.session_store import SessionStore
@@ -111,11 +112,11 @@ def checked_choices(choice):
     return item, options, names
 
 
-def line_for(entry, line_id):
+def line_for(entry, line_id, *, allow_sent=False):
     line = next((line for line in entry["session"].order.lines if line.line_id == line_id), None)
     if line is None:
         raise HTTPException(404, "This item is no longer in your order.")
-    if line.sent:
+    if line.sent and not allow_sent:
         raise HTTPException(409, "This item is already confirmed. Please ask staff about changes.")
     return line
 
@@ -226,9 +227,18 @@ def edit_line(session_id: UUID, line_id: UUID, request: Choice):
 @app.delete("/sessions/{session_id}/lines/{line_id}")
 def remove_line(session_id: UUID, line_id: UUID, request: Mutation):
     def remove(entry):
-        line = line_for(entry, str(line_id))
+        session = entry["session"]
+        line = line_for(entry, str(line_id), allow_sent=True)
+        if line.sent:
+            result = cancel_line(session.order.order_id, line.line_id)
+            if not result["cancelled"]:
+                raise HTTPException(
+                    409,
+                    f"The kitchen has already {result['reason']}. Please ask restaurant staff for help.",
+                )
         entry["session"].order.lines.remove(line)
-        return reply(entry, f"Removed {line.item_name}.")
+        verb = "Cancelled" if line.sent else "Removed"
+        return reply(entry, f"{verb} {line.item_name}.")
     return mutate(str(session_id), request, remove, str(line_id))
 
 

@@ -86,7 +86,44 @@ def test_clarification_then_confirmation_uses_existing_dialogue(client):
     assert state['lines'][0]['kitchen_status'] == 'received'
     assert state['kitchen_mode'] == 'mock'
     assert client.post(path+'/confirm',json=request).json() == first.json()
-    assert client.request('DELETE',path+'/lines/'+state['lines'][0]['key'],json=payload()).status_code == 409
+    cancel_request = payload()
+    cancelled = client.request('DELETE',path+'/lines/'+state['lines'][0]['key'],json=cancel_request)
+    assert cancelled.status_code == 200
+    assert cancelled.json()['snapshot']['lines'] == []
+    assert client.request('DELETE',path+'/lines/'+state['lines'][0]['key'],json=cancel_request).json() == cancelled.json()
+
+
+def test_confirmed_line_cannot_be_deleted_after_kitchen_starts_preparing(client):
+    from backend.app.kitchen_interface import advance_line_status
+
+    path = new(client)
+    state = client.post(path+'/lines', json=payload(item_id='kopi')).json()['snapshot']
+    state = client.post(path+'/confirm', json=payload(takeaway=False)).json()['snapshot']
+    line = state['lines'][0]
+    assert advance_line_status(line['key']) == 'preparing'
+    response = client.request('DELETE', path+'/lines/'+line['key'], json=payload())
+    assert response.status_code == 409
+    assert client.get(path).json()['snapshot']['total_cents'] == 120
+
+
+def test_saying_cancel_uses_the_same_kitchen_cancellation_rule(client):
+    from backend.app.kitchen_interface import advance_line_status
+
+    cancellable = new(client)
+    state = client.post(cancellable+'/lines', json=payload(item_id='kopi')).json()['snapshot']
+    state = client.post(cancellable+'/confirm', json=payload(takeaway=False)).json()['snapshot']
+    response = client.post(cancellable+'/messages', json=payload(text='cancel'))
+    assert response.status_code == 200
+    assert response.json()['snapshot']['lines'] == []
+
+    preparing = new(client)
+    state = client.post(preparing+'/lines', json=payload(item_id='kopi')).json()['snapshot']
+    state = client.post(preparing+'/confirm', json=payload(takeaway=False)).json()['snapshot']
+    assert advance_line_status(state['lines'][0]['key']) == 'preparing'
+    response = client.post(preparing+'/messages', json=payload(text='cancel'))
+    assert response.status_code == 200
+    assert len(response.json()['snapshot']['lines']) == 1
+    assert 'already being prepared' in response.json()['message'].lower()
 
 
 def test_sessions_are_isolated_and_unknown_session_is_not_silently_recreated(client):

@@ -37,6 +37,8 @@ The frontend server proxies `/api/order/*` to this service and `/api/stt/*` to t
 
 Routes: `GET /health`, `GET /menu`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, `POST /sessions/{id}/lines`, `PATCH` or `DELETE /sessions/{id}/lines/{line_id}`, and `POST /sessions/{id}/confirm`. All order-changing requests include a UUID `request_id` for idempotent retries. The response includes a complete cart snapshot and conversation. Only confirmed orders reach the existing mock kitchen. See `/docs` on port 8001 for request schemas.
 
+Deleting an unconfirmed line removes it immediately. Deleting a confirmed line first asks the kitchen module to cancel it and succeeds only while its status is `received`; a line in `preparing` or `done` remains on the bill.
+
 This is a local development API bound to loopback, with no public authentication or production persistence. Full startup and test instructions are in [the frontend README](../frontend/README.md).
 
 ## Running it

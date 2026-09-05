@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { proxyRequestHeaders } from './proxy-headers.mjs';
 const built = process.argv.includes('--built');
 const root = new URL(built ? '../dist/' : '../', import.meta.url);
 const routes = {
@@ -26,7 +27,7 @@ const server = http.createServer(async (req, res) => {
     const prefix=ordering?'/api/order':'/api/stt';
     const path=requested.pathname.slice(prefix.length);
     if(speech&&!['/health','/transcribe'].includes(path)){res.writeHead(404).end();return;}
-    const upstream=http.request({hostname:'127.0.0.1',port:ordering?8001:8000,path:path+requested.search,method:req.method,headers:{'Content-Type':req.headers['content-type']||'application/json'},timeout:150000},response=>{
+    const upstream=http.request({hostname:'127.0.0.1',port:ordering?8001:8000,path:path+requested.search,method:req.method,headers:proxyRequestHeaders(req.headers),timeout:150000},response=>{
       res.writeHead(response.statusCode,{'Content-Type':response.headers['content-type']||'application/json','Cache-Control':'no-store'});response.pipe(res);
     });
     upstream.on('timeout',()=>upstream.destroy(new Error('Backend timed out')));
