@@ -28,6 +28,28 @@ export async function requestJSON(path, { timeout = 20000, ...options } = {}) {
   } finally { clearTimeout(timer); }
 }
 
+export function isMenuItemAvailable(item) {
+  const remaining = Number(item?.remaining_stock);
+  return item?.available !== false && (!Number.isFinite(remaining) || remaining > 0);
+}
+
+export function kitchenStatusLabel(status, language = 'en') {
+  const labels = {
+    received: { en: 'ORDER RECEIVED', zh: '已接单' },
+    preparing: { en: 'IN PREPARATION', zh: '制作中' },
+    done: { en: 'DONE', zh: '已完成' },
+  };
+  return labels[status]?.[language] || labels[status]?.en || '';
+}
+
+export function kitchenStatusClass(status) {
+  return { received: 'received', preparing: 'preparing', done: 'done' }[status] || 'unknown';
+}
+
+export function canCancelLine(line) {
+  return !line?.sent || line.kitchen_status === 'received';
+}
+
 const infoIds = { chicken_rice:'CHICKEN_RICE', nasi_lemak:'NASI_LEMAK', fishball_noodles:'FISHBALL_NOODLES', wonton_noodles:'WANTON_MEE', roti_prata:'ROTI_PRATA', kopi:'KOPI', teh:'TEH' };
 const extraDetails = {
   beef_noodles:['牛肉面','Beef with your choice of noodles.','牛肉配您选择的面条。'],
@@ -53,7 +75,7 @@ export class BackendOrder {
   item(id){const item=this.items.find(item=>item.id===id);if(!item)throw new Error('Item not on the menu');return item;}
   get count(){return this.lines.reduce((count,line)=>count+line.quantity,0);}
   async open(){
-    this.items=prepareBackendMenu(await requestJSON('/api/order/menu'));
+    await this.refreshMenu();
     let sessionId;try{sessionId=sessionStorage.getItem('menu-helper-session');}catch{}
     let result;
     if(sessionId){
@@ -62,6 +84,12 @@ export class BackendOrder {
     }
     if(!result)result=await requestJSON('/api/order/sessions',{method:'POST'});
     this.apply(result);try{sessionStorage.setItem('menu-helper-session',this.session_id);}catch{}
+    return this;
+  }
+  async refreshMenu(){this.items=prepareBackendMenu(await requestJSON('/api/order/menu'));return this.items;}
+  async refresh(){
+    if(this.pendingRequest)return this;
+    this.apply(await requestJSON(`/api/order/sessions/${this.session_id}`));
     return this;
   }
   async mutate(path, method, payload={}) {

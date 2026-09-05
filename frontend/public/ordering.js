@@ -1,4 +1,4 @@
-import { BackendOrder, defaultOptions, requestJSON } from './backend-client.js';
+import { BackendOrder, canCancelLine, defaultOptions, isMenuItemAvailable, kitchenStatusClass, kitchenStatusLabel, requestJSON } from './backend-client.js';
 import { createBackendVoice } from './backend-voice.js';
 
 const words = {
@@ -62,6 +62,15 @@ Object.assign(words.zh, {
   milk_type:'奶的种类', strength:'浓度', spice:'辣椒', noodle_type:'面条种类', soup_style:'汤面或干面', condensed_milk:'炼乳', evaporated_milk:'淡奶', black:'不加奶', less_sweet:'少糖', no_sugar:'无糖', extra_sweet:'多糖', strong:'浓', weak:'淡',
   no_chilli:'不加辣椒', less_chilli:'少辣椒', normal_chilli:'正常辣椒', extra_chilli:'多辣椒', yellow_noodle:'黄面', kway_teow:'粿条', bee_hoon:'米粉', instant_noodle:'快熟面', soup:'汤面', dry:'干面',
 });
+Object.assign(words.en, {
+  outOfStock:'Out of stock',
+  stockLeft:'{count} left', stockChanged:'The menu has been refreshed. Please try again.',
+  cancellationUnavailable:'Cancellation is unavailable after preparation starts.',
+});
+Object.assign(words.zh, {
+  outOfStock:'已售罄', stockLeft:'剩余 {count} 份',
+  stockChanged:'菜单已刷新，请重试。', cancellationUnavailable:'开始制作后无法取消。',
+});
 const esc = value => String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const svg = name => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const money = cents => `$${(cents/100).toFixed(2)}`;
@@ -72,7 +81,7 @@ export function createOrdering({ onHome }) {
   let language='en', active=false, currentTab='menu', category='Food', items=[], order=null, loading=null, error=false;
   let messages=[], draft='', recording=false, speakingKey=null, speechToken=0, toastTimer=null;
   const canRecord=!!(navigator.mediaDevices?.getUserMedia&&window.AudioContext);
-  let busy=false, backendError='', speechAvailable=null;
+  let busy=false, backendError='', speechAvailable=null, orderPollTimer=null, refreshInFlight=false;
   let voiceState={phase:canRecord?'idle':'error',transcript:'',error:canRecord?null:'unsupported'};
   const voice=createBackendVoice({onChange(state){
     voiceState=state;
@@ -104,21 +113,30 @@ export function createOrdering({ onHome }) {
     const photo=photos[item.canonical.toUpperCase()];
     return `<div class="dish-picture ${small?'is-small':''} ${photo?'has-photo':''}">${photo?`<img src="${photo.url}" alt="" loading="lazy" referrerpolicy="no-referrer" />`:svg(item.category==='Drinks'?'cup':'food')}</div>`;
   }
+  function stockText(item) {
+    if(!isMenuItemAvailable(item))return t('outOfStock');
+    const remaining=Number(item.remaining_stock);
+    return Number.isFinite(remaining)?t('stockLeft').replace('{count}',String(remaining)):'';
+  }
+  function addAction(item,className) {
+    const available=isMenuItemAvailable(item);
+    return `<button class="${className}${available?'':' is-unavailable'}" data-add="${item.canonical}" aria-label="${available?t('add'):t('outOfStock')} ${esc(name(item))}" ${available?'':'disabled'}>${available?svg('plus')+t('add'):t('outOfStock')}</button>`;
+  }
   function menuView() {
     const visible=items.filter(item=>item.category===category);
     return `<div class="view-heading"><div><span class="restaurant-name">${t('restaurant')}</span><h1>${t('welcome')}</h1><p>${t('menuHint')}</p></div><span class="menu-number">${visible.length} ${language==='zh'?'款选择':'choices'}</span></div>
       <div class="category-switch" role="group" aria-label="${t('menu')}">${['Food','Drinks'].map(c=>`<button data-category="${c}" aria-pressed="${category===c}" class="${category===c?'selected':''}">${svg(c==='Food'?'food':'cup')}${t(c.toLowerCase())}</button>`).join('')}</div>
-      <div class="dish-grid">${visible.map(item=>{const count=order.lines.filter(l=>l.id===item.canonical).reduce((n,l)=>n+l.quantity,0);return `<article class="dish-card">${picture(item)}<div class="dish-info"><h2>${esc(name(item))}</h2><p class="dish-description">${esc(description(item))}</p><strong class="dish-price">${money(item.cents)}</strong>${count?`<span class="dish-count">${svg('check')}${count} ${t('inOrder')}</span>`:''}<div class="dish-actions">${listenButton(`${name(item)}. ${money(item.cents)}. ${description(item)}`,`dish-${item.canonical}`)}<button class="add-button" data-add="${item.canonical}" aria-label="${t('add')} ${esc(name(item))}">${svg('plus')}${t('add')}</button></div></div></article>`;}).join('')}</div>
+      <div class="dish-grid">${visible.map(item=>{const count=order.lines.filter(l=>l.id===item.canonical).reduce((n,l)=>n+l.quantity,0);const available=isMenuItemAvailable(item);return `<article class="dish-card${available?'':' is-unavailable'}">${picture(item)}<div class="dish-info"><h2>${esc(name(item))}</h2><p class="dish-description">${esc(description(item))}</p><strong class="dish-price">${money(item.cents)}</strong><span class="dish-stock${available?'':' is-unavailable'}">${esc(stockText(item))}</span>${count?`<span class="dish-count">${svg('check')}${count} ${t('inOrder')}</span>`:''}<div class="dish-actions">${listenButton(`${name(item)}. ${money(item.cents)}. ${description(item)}`,`dish-${item.canonical}`)}${addAction(item,'add-button')}</div></div></article>`;}).join('')}</div>
       <p class="photo-note">${t('photos')} <button data-action="credits">${t('credits')}</button></p>
       <div class="view-order-dock"><button class="primary-button" data-tab="order">${svg('cart')}<span>${t('viewOrder')} <span class="dock-count">(${order.count})</span></span><strong>${money(order.total)}</strong>${svg('arrow')}</button></div>`;
   }
   function orderSummary() { return order.lines.length ? order.lines.map(line=>`${line.quantity} × ${name(order.item(line.id))}${optionsText(line.options)?`, ${optionsText(line.options)}`:''}. ${money(line.subtotal_cents)}`).join('. ')+`. ${t('total')}: ${money(order.total)}.` : t('readbackEmpty'); }
   function orderView() {
-    return `<div class="view-heading"><div><h1>${t('yourOrder')}</h1><p>${t('reviewHint')}</p></div></div>${!order.lines.length?`<div class="empty-order"><span class="empty-icon">${svg('cart')}</span><h2>${t('empty')}</h2><p>${t('emptyHint')}</p><button class="primary-button" data-tab="menu">${t('browse')}${svg('arrow')}</button></div>`:`${order.confirmed?`<div class="confirmation-banner" role="status">${svg('check')}<div><strong>${t('confirmed')}</strong><p>${t('confirmedHint')}</p></div></div>`:''}<div class="order-lines">${order.lines.map(line=>{const item=order.item(line.id);return `<article class="order-line" aria-label="${esc(name(item))}">${picture(item,true)}<div class="line-details"><h2>${esc(name(item))}</h2>${optionsText(line.options)?`<p>${esc(optionsText(line.options))}</p>`:''}<strong class="line-price">${money(line.subtotal_cents)}</strong>${line.sent?`<p>${t('confirmedLine')}</p>`:''}<div class="line-bottom"><div class="quantity-control" role="group" aria-label="${t('quantity')} ${esc(name(item))}"><button data-quantity="${esc(line.key)}" data-delta="-1" aria-label="${t('minus')} ${esc(name(item))}" ${line.quantity<=1||line.sent?'disabled':''}>${svg('minus')}</button><span aria-label="${t('quantity')}: ${line.quantity}">${line.quantity}</span><button data-quantity="${esc(line.key)}" data-delta="1" aria-label="${t('plus')} ${esc(name(item))}" ${line.quantity>=20||line.sent?'disabled':''}>${svg('plus')}</button></div><div class="line-edit-buttons"><button data-edit="${esc(line.key)}" ${line.sent?'disabled':''}>${svg('edit')}${t('change')}</button><button data-remove="${esc(line.key)}" ${line.sent?'disabled':''}>${svg('trash')}${t('remove')}</button></div></div></div></article>`;}).join('')}</div><div class="order-total"><span>${t('total')}</span><strong>${money(order.total)}</strong></div><div class="order-final-actions">${listenButton(orderSummary(),'order-summary',t('readOrder'),'read-order')}${order.confirmed?`<button class="primary-button" data-action="new-order">${t('newOrder')}</button>`:`<button class="primary-button" data-action="confirm">${svg('check')}${t('confirm')}</button>`}<p class="demo-caption">${t('notSent')}</p></div>`}`;
+    return `<div class="view-heading"><div><h1>${t('yourOrder')}</h1><p>${t('reviewHint')}</p></div></div>${!order.lines.length?`<div class="empty-order"><span class="empty-icon">${svg('cart')}</span><h2>${t('empty')}</h2><p>${t('emptyHint')}</p><button class="primary-button" data-tab="menu">${t('browse')}${svg('arrow')}</button></div>`:`${order.confirmed?`<div class="confirmation-banner" role="status">${svg('check')}<div><strong>${t('confirmed')}</strong><p>${t('confirmedHint')}</p></div></div>`:''}<div class="order-lines">${order.lines.map(line=>{const item=order.item(line.id);const status=line.sent?kitchenStatusLabel(line.kitchen_status,language):'';const statusClass=kitchenStatusClass(line.kitchen_status);const cancelable=canCancelLine(line);return `<article class="order-line" aria-label="${esc(name(item))}">${picture(item,true)}<div class="line-details"><h2>${esc(name(item))}</h2>${optionsText(line.options)?`<p>${esc(optionsText(line.options))}</p>`:''}<strong class="line-price">${money(line.subtotal_cents)}</strong>${status?`<p class="kitchen-status kitchen-status-${statusClass}" role="status">${esc(status)}</p>`:''}<div class="line-bottom"><div class="quantity-control" role="group" aria-label="${t('quantity')} ${esc(name(item))}"><button data-quantity="${esc(line.key)}" data-delta="-1" aria-label="${t('minus')} ${esc(name(item))}" ${line.quantity<=1||line.sent?'disabled':''}>${svg('minus')}</button><span aria-label="${t('quantity')}: ${line.quantity}">${line.quantity}</span><button data-quantity="${esc(line.key)}" data-delta="1" aria-label="${t('plus')} ${esc(name(item))}" ${line.quantity>=20||line.sent?'disabled':''}>${svg('plus')}</button></div><div class="line-edit-buttons"><button data-edit="${esc(line.key)}" ${line.sent?'disabled':''}>${svg('edit')}${t('change')}</button><button data-remove="${esc(line.key)}" ${cancelable?'':'disabled'} ${cancelable?'':`title="${esc(t('cancellationUnavailable'))}"`}>${svg('trash')}${t('remove')}</button></div></div></div></article>`;}).join('')}</div><div class="order-total"><span>${t('total')}</span><strong>${money(order.total)}</strong></div><div class="order-final-actions">${listenButton(orderSummary(),'order-summary',t('readOrder'),'read-order')}${order.confirmed?`<button class="primary-button" data-action="new-order">${t('newOrder')}</button>`:`<button class="primary-button" data-action="confirm">${svg('check')}${t('confirm')}</button>`}<p class="demo-caption">${t('notSent')}</p></div>`}`;
   }
   function chatView() {
     const status=voicePresentation();
-    return `<div class="view-heading chat-heading"><div><h1>${t('helpTitle')}</h1><p>${t('helpHint')}</p></div><span class="helper-symbol">${svg('chat')}</span></div><div class="chat-log" role="log" aria-live="off" aria-label="${t('chat')}">${messages.map((message,index)=>`<div class="chat-message ${message.role}">${message.role==='assistant'?`<span class="message-author">${svg('menu')}${t('helper')}</span>`:''}<div class="chat-bubble"><p>${esc(message.key?t(message.key):message.text)}</p>${message.ids?.length?`<div class="chat-menu-list">${message.ids.slice(0,6).map(id=>{const item=order.item(id);return `<div><span>${esc(name(item))}<strong>${money(item.cents)}</strong></span><button data-add="${id}" aria-label="${t('add')} ${esc(name(item))}">${svg('plus')}${t('add')}</button></div>`;}).join('')}</div>`:''}${message.role==='assistant'?listenButton((message.key?t(message.key):message.text)+(message.ids?.map(id=>{const item=order.item(id);return ` ${name(item)}, ${money(item.cents)}.`;}).join('')||''),`message-${index}`):''}</div></div>`).join('')}</div>
+    return `<div class="view-heading chat-heading"><div><h1>${t('helpTitle')}</h1><p>${t('helpHint')}</p></div><span class="helper-symbol">${svg('chat')}</span></div><div class="chat-log" role="log" aria-live="off" aria-label="${t('chat')}">${messages.map((message,index)=>`<div class="chat-message ${message.role}">${message.role==='assistant'?`<span class="message-author">${svg('menu')}${t('helper')}</span>`:''}<div class="chat-bubble"><p>${esc(message.key?t(message.key):message.text)}</p>${message.ids?.length?`<div class="chat-menu-list">${message.ids.slice(0,6).map(id=>{const item=order.item(id);return `<div><span>${esc(name(item))}<strong>${money(item.cents)}</strong></span>${addAction(item,'chat-add-button')}</div>`;}).join('')}</div>`:''}${message.role==='assistant'?listenButton((message.key?t(message.key):message.text)+(message.ids?.map(id=>{const item=order.item(id);return ` ${name(item)}, ${money(item.cents)}.`;}).join('')||''),`message-${index}`):''}</div></div>`).join('')}</div>
       <div class="chat-composer"><div class="connection-status"><span>${t(speechAvailable===null?'voiceChecking':speechAvailable?'voiceReady':'voiceOffline')}</span><button data-action="check-services">${t('checkServices')}</button></div><div class="suggestions"><button data-prompt="drinks">${svg('cup')}${t('showDrinks')}</button><button data-prompt="budget">${t('under5')}</button><button data-tab="order">${svg('cart')}${t('review')}</button></div>
       <button class="voice-button ${recording?'is-recording':''}" id="voice-button" aria-pressed="${recording}" aria-describedby="voice-status" ${canRecord&&!busy?'':'disabled'}>${svg(recording?'stop':'mic')}<span>${status.button}</span></button><div id="voice-status" class="voice-status ${status.error?'has-error':''}" role="status" aria-live="polite" aria-atomic="true"><strong>${status.title}</strong><p>${status.hint}</p></div><button class="type-instead" data-action="type-instead" ${status.error?'':'hidden'}>${t('useTyping')}</button>
       <form id="chat-form" class="message-form"><label class="sr-only" for="chat-input">${t('typeLabel')}</label><textarea id="chat-input" rows="1" maxlength="400" placeholder="${t('placeholder')}" ${recording||busy?'readonly':''}>${esc(draft)}</textarea><button type="submit" aria-label="${t('send')}" ${recording||busy?'disabled':''}>${svg('arrow')}<span>${t('send')}</span></button></form></div>`;
@@ -136,7 +154,7 @@ export function createOrdering({ onHome }) {
   function scrollChat() { const log=root.querySelector('.chat-log');if(log)log.scrollTop=log.scrollHeight; }
   function navigate(tab,{focus=false}={}) {
     if(!['menu','chat','order'].includes(tab))return;
-    stopVoice();stopSpeech();currentTab=tab;history.replaceState({},'',`#${tab}`);render();
+    stopVoice();stopSpeech();currentTab=tab;history.replaceState({},'',`#${tab}`);render();syncOrderPolling();
     if(tab==='chat')scrollChat();
     if(focus)root.querySelector(`#tab-${tab}`)?.focus();
     window.scrollTo({top:0,behavior:'instant'});
@@ -150,21 +168,48 @@ export function createOrdering({ onHome }) {
     try {
       if(!order){loading ||= new BackendOrder().open();const connected=await loading;items=connected.items;order=connected;messages=order.messages;if(order.sessionRestarted)toast(language==='zh'?'上次体验已过期，已开始新的订单。':'The previous demo session expired. A new order has been started.');}
       checkSpeech();
-      render();return snapshot();
+      render();syncOrderPolling();return snapshot();
     }catch(problem){loading=null;error=true;backendError=problem.message||'The ordering backend is offline.';render();throw problem;}
   }
-  function hide() {active=false;stopVoice();stopSpeech();root.hidden=true;document.querySelector('#main').hidden=false;document.body.classList.remove('is-ordering');if(choiceDialog.open)choiceDialog.close();}
+  function hide() {active=false;stopOrderPolling();stopVoice();stopSpeech();root.hidden=true;document.querySelector('#main').hidden=false;document.body.classList.remove('is-ordering');if(choiceDialog.open)choiceDialog.close();}
   function showDialog(body){stopVoice();stopSpeech();choiceDialog.innerHTML=`<div class="dialog-header"><span class="dialog-kicker">${t('helper')}</span><button class="close-button" data-dialog-close aria-label="${t('close')}">${svg('close')}</button></div>${body}`;choiceDialog.showModal();choiceDialog.querySelector('h2')?.focus();}
   async function checkSpeech(){
     try{const health=await requestJSON('/api/stt/health',{timeout:5000});speechAvailable=health.engine_ready===true;}
     catch{speechAvailable=false;}
     if(active)render();
   }
+  function errorText(problem) {
+    const message=problem.message||'The ordering backend could not be reached.';
+    return problem.code==='stock_unavailable'?`${message} ${t('stockChanged')}`:message;
+  }
+  function stopOrderPolling() {
+    if(orderPollTimer){clearInterval(orderPollTimer);orderPollTimer=null;}
+  }
+  async function refreshOrderSnapshot() {
+    if(refreshInFlight||!active||currentTab!=='order'||document.hidden||!order||order.pendingRequest)return;
+    refreshInFlight=true;
+    try {
+      await order.refresh();
+      if(active&&currentTab==='order'){messages=order.messages;render();}
+    } catch(problem) {
+      if(active&&currentTab==='order'){backendError=errorText(problem);render();}
+    } finally { refreshInFlight=false; }
+  }
+  function syncOrderPolling() {
+    stopOrderPolling();
+    if(active&&currentTab==='order'&&!document.hidden&&order){
+      refreshOrderSnapshot();
+      orderPollTimer=setInterval(refreshOrderSnapshot,4000);
+    }
+  }
   async function runChange(action){
     if(busy)return false;
     stopVoice();busy=true;backendError='';render();
     try{await action();messages=order.messages;return true;}
-    catch(problem){backendError=problem.message||'The ordering backend could not be reached.';return false;}
+    catch(problem){
+      if(problem.code==='stock_unavailable'&&order){try{items=await order.refreshMenu();}catch{}}
+      backendError=errorText(problem);return false;
+    }
     finally{busy=false;render();if(!backendError)announce(messages.at(-1)?.text||t('updated'));if(currentTab==='chat')scrollChat();}
   }
   function editLine(key,addId=null) {
@@ -216,7 +261,7 @@ export function createOrdering({ onHome }) {
     const button=event.target.closest('button');if(!button)return;
     if(button.dataset.tab){navigate(button.dataset.tab,{focus:true});return;}
     if(button.dataset.category){category=button.dataset.category;render();root.querySelector(`[data-category="${category}"]`).focus();return;}
-    if(button.dataset.add){const item=order.item(button.dataset.add);if(item.modifier_groups.some(group=>group.required)){editLine(null,item.id);return;}await runChange(()=>order.add(item.id));root.querySelector(`[data-add="${item.id}"]`)?.focus();return;}
+    if(button.dataset.add){const item=order.item(button.dataset.add);if(!isMenuItemAvailable(item)){toast(t('outOfStock'));return;}if(item.modifier_groups.some(group=>group.required)){editLine(null,item.id);return;}await runChange(()=>order.add(item.id));root.querySelector(`[data-add="${item.id}"]`)?.focus();return;}
     if(button.dataset.quantity){const line=order.lines.find(l=>l.key===button.dataset.quantity);await runChange(()=>order.edit(line.key,line.quantity+Number(button.dataset.delta),line.options));return;}
     if(button.dataset.remove){await runChange(()=>order.remove(button.dataset.remove));return;}
     if(button.dataset.edit){editLine(button.dataset.edit);return;}
@@ -255,7 +300,7 @@ export function createOrdering({ onHome }) {
     else choiceDialog.querySelector('#choice-error').textContent=backendError;
   });
   choiceDialog.addEventListener('close',stopSpeech);
-  window.addEventListener('pagehide',()=>{stopSpeech();stopVoice();});
-  document.addEventListener('visibilitychange',()=>{if(document.hidden){stopSpeech();stopVoice();}});
+  window.addEventListener('pagehide',()=>{stopOrderPolling();stopSpeech();stopVoice();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){stopOrderPolling();stopSpeech();stopVoice();}else syncOrderPolling();});
   return { open, hide, snapshot, get active(){return active;}, setLanguage(next){language=next;stopSpeech();stopVoice();if(choiceDialog.open)choiceDialog.close();render();}, navigate };
 }
