@@ -203,6 +203,23 @@ def get_line_status(order_id: str, line_id: str):
     return serialize_kitchen_status(_LINE_STATUS.get(line_id))
 
 
+def synchronize_line_status(order: Order, line) -> KitchenStatus | None:
+    """Refresh an accepted order line from the current kitchen ticket state."""
+    if not line.sent:
+        line.kitchen_status = None
+        return None
+    line.kitchen_status = normalize_kitchen_status(
+        get_line_status(order.order_id, line.line_id)
+    )
+    return line.kitchen_status
+
+
+def synchronize_order_status(order: Order) -> None:
+    """Refresh every accepted line before an API snapshot is presented."""
+    for line in order.lines:
+        synchronize_line_status(order, line)
+
+
 def cancel_order_line(order: Order, line) -> dict:
     """Synchronize a line and apply the shared cancellation status gate.
 

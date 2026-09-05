@@ -46,6 +46,23 @@ def test_menu_buttons_chat_and_edits_share_backend_prices(client):
     assert client.get(path).json()['snapshot'] == edited
 
 
+def test_menu_exposes_live_stock_without_changing_existing_item_fields(client):
+    set_stock('chicken_rice', 2)
+
+    item = next(item for item in client.get('/menu').json()['items'] if item['id'] == 'chicken_rice')
+
+    assert item['name'] == 'Hainanese Chicken Rice'
+    assert item['price'] == 4.5
+    assert item['modifier_groups']
+    assert item['available'] is True
+    assert item['remaining_stock'] == 2
+
+    set_stock('chicken_rice', 0)
+    sold_out = next(item for item in client.get('/menu').json()['items'] if item['id'] == 'chicken_rice')
+    assert sold_out['available'] is False
+    assert sold_out['remaining_stock'] == 0
+
+
 def test_duplicate_add_and_message_requests_are_idempotent(client):
     path = new(client)
     request = payload(item_id='kopi',quantity=2)
@@ -292,6 +309,57 @@ def test_dialogue_cancellation_uses_the_synchronized_kitchen_status_gate(client)
     assert 'already being prepared' in response.json()['message'].lower()
     assert response.json()['snapshot']['lines'][0]['kitchen_status'] == 'preparing'
     assert get_stock_status('kopi') == 0
+
+
+def test_session_get_synchronizes_status_after_mock_helper_update(client):
+    path = new(client)
+    added = client.post(path+'/lines', json=payload(item_id='kopi')).json()['snapshot']
+    line_key = added['lines'][0]['key']
+    assert client.post(path+'/confirm', json=payload(takeaway=False)).status_code == 200
+    assert client.get(path).json()['snapshot']['lines'][0]['kitchen_status'] == 'received'
+
+    assert advance_line_status(line_key) == 'preparing'
+    current = client.get(path).json()['snapshot']
+    assert current['lines'][0]['kitchen_status'] == 'preparing'
+
+
+def test_demo_status_route_advances_once_per_request_and_persists_in_process(client):
+    path = new(client)
+    added = client.post(path+'/lines', json=payload(item_id='kopi')).json()['snapshot']
+    line_key = added['lines'][0]['key']
+    assert client.post(path+'/confirm', json=payload(takeaway=False)).status_code == 200
+
+    request = payload()
+    first = client.post(path+f'/lines/{line_key}/advance-status', json=request)
+    replay = client.post(path+f'/lines/{line_key}/advance-status', json=request)
+
+    assert first.status_code == replay.status_code == 200
+    assert first.json() == replay.json()
+    assert first.json()['snapshot']['lines'][0]['kitchen_status'] == 'preparing'
+
+    second = client.post(path+f'/lines/{line_key}/advance-status', json=payload())
+    assert second.status_code == 200
+    assert second.json()['snapshot']['lines'][0]['kitchen_status'] == 'done'
+    assert client.get(path).json()['snapshot']['lines'][0]['kitchen_status'] == 'done'
+
+
+def test_demo_status_route_rejects_draft_and_terminal_advancement(client):
+    path = new(client)
+    draft = client.post(path+'/lines', json=payload(item_id='kopi')).json()['snapshot']
+    line_key = draft['lines'][0]['key']
+
+    draft_response = client.post(path+f'/lines/{line_key}/advance-status', json=payload())
+    assert draft_response.status_code == 409
+    assert 'confirm' in draft_response.json()['detail'].lower()
+
+    assert client.post(path+'/confirm', json=payload(takeaway=False)).status_code == 200
+    assert client.post(path+f'/lines/{line_key}/advance-status', json=payload()).status_code == 200
+    assert client.post(path+f'/lines/{line_key}/advance-status', json=payload()).status_code == 200
+
+    terminal = client.post(path+f'/lines/{line_key}/advance-status', json=payload())
+    assert terminal.status_code == 409
+    assert 'already done' in terminal.json()['detail'].lower()
+    assert client.get(path).json()['snapshot']['lines'][0]['kitchen_status'] == 'done'
 
 
 def test_sessions_are_isolated_and_unknown_session_is_not_silently_recreated(client):

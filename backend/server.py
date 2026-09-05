@@ -13,9 +13,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .app.dialogue_manager import DialogueManager
-from .app.kitchen_interface import cancel_order_line
+from .app.kitchen_interface import (
+    advance_line_status,
+    cancel_order_line,
+    check_availability,
+    synchronize_line_status,
+    synchronize_order_status,
+)
 from .app.menu_data import MENU
-from .app.models import DraftLine, serialize_kitchen_status
+from .app.models import DraftLine, KitchenStatus, serialize_kitchen_status
 from .app.session_store import SessionStore
 from .app.stock_validation import check_draft_availability, check_draft_line
 
@@ -53,6 +59,7 @@ def session_for(session_id):
 
 def snapshot(entry):
     session = entry["session"]
+    synchronize_order_status(session.order)
     return {
         "session_id": session.session_id,
         "order_id": session.order.order_id,
@@ -143,7 +150,15 @@ def health():
 
 @app.get("/menu")
 def menu():
-    return {"items": [asdict(item) for item in MENU], "kitchen_mode": "mock"}
+    with lock:
+        items = []
+        for item in MENU:
+            payload = asdict(item)
+            availability = check_availability(item.id, 1)
+            payload["available"] = availability["available"]
+            payload["remaining_stock"] = availability["remaining_stock"]
+            items.append(payload)
+        return {"items": items, "kitchen_mode": "mock"}
 
 
 @app.post("/sessions")
@@ -266,6 +281,42 @@ def remove_line(session_id: UUID, line_id: UUID, request: Mutation):
         entry["session"].order.lines.remove(line)
         return reply(entry, f"Removed {line.item_name}.")
     return mutate(str(session_id), request, remove, str(line_id))
+
+
+@app.post(
+    "/sessions/{session_id}/lines/{line_id}/advance-status",
+    summary="Advance a mock kitchen line (local demo only)",
+)
+def advance_status(session_id: UUID, line_id: UUID, request: Mutation):
+    """Advance one accepted line to its next mock-kitchen lifecycle state.
+
+    This is intentionally a local demonstration hook, not a production kitchen
+    integration endpoint. The route accepts no target status, so only the
+    fixed received -> preparing -> done progression can be requested.
+    """
+    def advance(entry):
+        line = line_for(entry, str(line_id), allow_sent=True)
+        if not line.sent:
+            raise HTTPException(
+                409,
+                "Confirm this item before advancing its kitchen status in the local demo.",
+            )
+
+        current = synchronize_line_status(entry["session"].order, line)
+        if current is None:
+            raise HTTPException(409, "This item has no active kitchen status to advance.")
+        if current is KitchenStatus.DONE:
+            raise HTTPException(409, "This item is already done; it cannot advance further.")
+
+        advance_line_status(line.line_id)
+        status = synchronize_line_status(entry["session"].order, line)
+        return reply(
+            entry,
+            f"{line.item_name} is now {serialize_kitchen_status(status)}.",
+            kitchen_status=serialize_kitchen_status(status),
+        )
+
+    return mutate(str(session_id), request, advance, f"{line_id}:advance-status")
 
 
 @app.post("/sessions/{session_id}/confirm")

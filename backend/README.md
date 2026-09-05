@@ -35,7 +35,7 @@ The website uses `server.py` as a small HTTP adapter around the existing dialogu
 
 The frontend server proxies `/api/order/*` to this service and `/api/stt/*` to the separate STT service on port 8000. The browser uses the ordering menu's 12 items and server-calculated prices. Sessions are isolated and held in memory; restarting this web API clears its demo sessions. The CLI's file-backed table sessions remain separate.
 
-Routes: `GET /health`, `GET /menu`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, `POST /sessions/{id}/lines`, `PATCH` or `DELETE /sessions/{id}/lines/{line_id}`, and `POST /sessions/{id}/confirm`. All order-changing requests include a UUID `request_id` for idempotent retries. The response includes a complete cart snapshot and conversation. Only confirmed orders reach the existing mock kitchen. See `/docs` on port 8001 for request schemas.
+Routes: `GET /health`, `GET /menu`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, `POST /sessions/{id}/lines`, `PATCH` or `DELETE /sessions/{id}/lines/{line_id}`, `POST /sessions/{id}/lines/{line_id}/advance-status` (local mock-kitchen demo only), and `POST /sessions/{id}/confirm`. All order-changing requests include a UUID `request_id` for idempotent retries. Menu responses include live mock-stock availability, and session snapshots include each line's current kitchen status. The response includes a complete cart snapshot and conversation. Only confirmed orders reach the existing mock kitchen. See `/docs` on port 8001 for request schemas.
 
 This is a local development API bound to loopback, with no public authentication or production persistence. Full startup and test instructions are in [the frontend README](../frontend/README.md).
 
