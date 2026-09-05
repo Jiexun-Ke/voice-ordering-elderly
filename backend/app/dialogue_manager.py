@@ -36,7 +36,14 @@ from .matcher import (
     strip_matched_form,
 )
 from .menu_data import CATEGORY_ALIASES
-from .models import DialogueResponse, DraftLine, PendingClarification
+from .models import (
+    DialogueResponse,
+    DraftLine,
+    KitchenStatus,
+    PendingClarification,
+    normalize_kitchen_status,
+    serialize_kitchen_status,
+)
 
 MAX_RETRIES = 2
 AMBIGUITY_MARGIN = 15  # if top-2 item scores are this close, treat as ambiguous
@@ -988,7 +995,12 @@ class DialogueManager:
             self._persist(session)
             return True, ""
 
-        stage = "already being prepared" if result["status"] == "preparing" else "already ready"
+        status = normalize_kitchen_status(result.get("status"))
+        stage = (
+            "already being prepared"
+            if status is KitchenStatus.IN_PREPARATION
+            else "already ready"
+        )
         return False, (
             f"Sorry, your {line.item_name} is {stage}, so I can't cancel that one. "
             "It'll still be on your bill. Anything else?"
@@ -1148,7 +1160,9 @@ class DialogueManager:
                 continue
             if result["available"]:
                 line.sent = True
-                line.kitchen_status = result.get("status") or "received"
+                line.kitchen_status = normalize_kitchen_status(
+                    result.get("status") or KitchenStatus.ORDER_RECEIVED
+                )
             else:
                 # Drop it from the bill so they're never charged for food that
                 # can't be made.
@@ -1195,7 +1209,10 @@ class DialogueManager:
             f"{l.quantity} x {l.item_name} ${l.subtotal:.2f}" for l in session.order.lines
         )
         still_cooking = [l.item_name for l in session.order.lines
-                         if l.kitchen_status in ("received", "preparing")]
+                         if l.kitchen_status in (
+                             KitchenStatus.ORDER_RECEIVED,
+                             KitchenStatus.IN_PREPARATION,
+                         )]
         note = ""
         if still_cooking:
             names = list(dict.fromkeys(still_cooking))
@@ -1300,8 +1317,13 @@ class DialogueManager:
             return ""
         from .kitchen_interface import get_line_status
         status = get_line_status(session.order.order_id, line.line_id)
-        if status in ("preparing", "done"):
-            stage = "already being prepared" if status == "preparing" else "already ready"
+        status = normalize_kitchen_status(status)
+        if status in (KitchenStatus.IN_PREPARATION, KitchenStatus.DONE):
+            stage = (
+                "already being prepared"
+                if status is KitchenStatus.IN_PREPARATION
+                else "already ready"
+            )
             return (
                 f"Sorry, your {line.item_name} is {stage}, so I can't change that one now. "
                 "Would you like to order something else instead?"
@@ -1355,7 +1377,7 @@ class DialogueManager:
                     "unit_price": l.unit_price,
                     "subtotal": l.subtotal,
                     "sent": l.sent,
-                    "kitchen_status": l.kitchen_status,
+                    "kitchen_status": serialize_kitchen_status(l.kitchen_status),
                 }
                 for l in lines
             ],

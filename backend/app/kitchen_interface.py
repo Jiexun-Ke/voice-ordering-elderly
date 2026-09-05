@@ -62,7 +62,7 @@ send_order_to_kitchen(), get_line_status() and cancel_line() with real calls
 JSON shape. Nothing else in this codebase needs to change.
 --------------------------------------------------------------------------
 """
-from .models import Order
+from .models import KitchenStatus, Order, next_kitchen_status, serialize_kitchen_status
 
 # Dummy stock levels, standing in for the kitchen's real inventory store.
 _STOCK = {
@@ -73,9 +73,13 @@ _STOCK = {
 }
 
 # line_id -> status, standing in for the kitchen's ticket board.
-_LINE_STATUS: dict[str, str] = {}
+_LINE_STATUS: dict[str, KitchenStatus] = {}
 
-STATUS_FLOW = ["received", "preparing", "done"]
+STATUS_FLOW = [
+    KitchenStatus.ORDER_RECEIVED,
+    KitchenStatus.IN_PREPARATION,
+    KitchenStatus.DONE,
+]
 
 
 def order_to_kitchen_payload(order: Order, lines=None) -> dict:
@@ -112,7 +116,7 @@ def send_order_to_kitchen(order: Order, lines=None) -> dict:
         ok = available_stock >= line["quantity"]
         if ok:
             _STOCK[line["item_id"]] -= line["quantity"]
-            _LINE_STATUS[line["line_id"]] = "received"
+            _LINE_STATUS[line["line_id"]] = KitchenStatus.ORDER_RECEIVED
         else:
             all_available = False
         line_results.append({
@@ -122,7 +126,7 @@ def send_order_to_kitchen(order: Order, lines=None) -> dict:
             "requested_quantity": line["quantity"],
             "available": ok,
             "remaining_stock": _STOCK.get(line["item_id"], 0),
-            "status": _LINE_STATUS.get(line["line_id"]),
+            "status": serialize_kitchen_status(_LINE_STATUS.get(line["line_id"])),
         })
     return {
         "order_id": payload["order_id"],
@@ -132,7 +136,8 @@ def send_order_to_kitchen(order: Order, lines=None) -> dict:
 
 
 def get_line_status(order_id: str, line_id: str):
-    return _LINE_STATUS.get(line_id)
+    # The kitchen integration contract continues to expose wire strings.
+    return serialize_kitchen_status(_LINE_STATUS.get(line_id))
 
 
 def cancel_line(order_id: str, line_id: str) -> dict:
@@ -144,13 +149,21 @@ def cancel_line(order_id: str, line_id: str) -> dict:
     if status is None:
         # Never reached the kitchen, so there is nothing to cancel there.
         return {"cancelled": True, "status": None, "reason": "not sent to kitchen"}
-    if status == "received":
+    if status is KitchenStatus.ORDER_RECEIVED:
         _LINE_STATUS.pop(line_id, None)
-        return {"cancelled": True, "status": "received", "reason": "cancelled before preparation"}
+        return {
+            "cancelled": True,
+            "status": serialize_kitchen_status(status),
+            "reason": "cancelled before preparation",
+        }
     return {
         "cancelled": False,
-        "status": status,
-        "reason": "already being prepared" if status == "preparing" else "already prepared",
+        "status": serialize_kitchen_status(status),
+        "reason": (
+            "already being prepared"
+            if status is KitchenStatus.IN_PREPARATION
+            else "already prepared"
+        ),
     }
 
 
@@ -162,10 +175,9 @@ def advance_line_status(line_id: str) -> str | None:
     current = _LINE_STATUS.get(line_id)
     if current is None:
         return None
-    idx = STATUS_FLOW.index(current)
-    if idx < len(STATUS_FLOW) - 1:
-        _LINE_STATUS[line_id] = STATUS_FLOW[idx + 1]
-    return _LINE_STATUS[line_id]
+    if current is not KitchenStatus.DONE:
+        _LINE_STATUS[line_id] = next_kitchen_status(current)
+    return serialize_kitchen_status(_LINE_STATUS[line_id])
 
 
 def reset_kitchen(stock: dict | None = None) -> None:

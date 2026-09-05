@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from .app.dialogue_manager import DialogueManager
 from .app.menu_data import MENU
-from .app.models import DraftLine
+from .app.models import DraftLine, serialize_kitchen_status
 from .app.session_store import SessionStore
 
 app = FastAPI(title="Menu Helper Ordering", version="0.1.0")
@@ -62,7 +62,7 @@ def snapshot(entry):
             "options": line.modifiers, "option_names": line.modifier_names,
             "unit_cents": round(line.unit_price * 100),
             "subtotal_cents": round(line.subtotal * 100), "sent": line.sent,
-            "kitchen_status": line.kitchen_status,
+            "kitchen_status": serialize_kitchen_status(line.kitchen_status),
         } for line in session.order.lines],
         "total_cents": round(session.order.total * 100),
         "messages": entry["messages"], "kitchen_mode": "mock",

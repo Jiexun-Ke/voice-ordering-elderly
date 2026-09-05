@@ -20,7 +20,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .models import Order, OrderLine, Session
+from .models import (
+    Order,
+    OrderLine,
+    Session,
+    normalize_kitchen_status,
+    serialize_kitchen_status,
+)
 
 
 def _new_session(table_id: str) -> Session:
@@ -95,7 +101,7 @@ class SessionStore:
                     "modifiers": l.modifier_names,
                     "unit_price": l.unit_price,
                     "subtotal": l.subtotal,
-                    "kitchen_status": l.kitchen_status,
+                    "kitchen_status": serialize_kitchen_status(l.kitchen_status),
                 }
                 for l in session.order.lines
             ],
@@ -145,7 +151,7 @@ class SessionStore:
                         "modifiers": l.modifiers,
                         "modifier_names": l.modifier_names,
                         "sent": l.sent,
-                        "kitchen_status": l.kitchen_status,
+                        "kitchen_status": serialize_kitchen_status(l.kitchen_status),
                     }
                     for l in session.order.lines
                 ],
@@ -170,7 +176,7 @@ class SessionStore:
                     modifiers=l.get("modifiers", {}),
                     modifier_names=l.get("modifier_names", {}),
                     sent=l.get("sent", False),
-                    kitchen_status=l.get("kitchen_status"),
+                    kitchen_status=normalize_kitchen_status(l.get("kitchen_status")),
                 )
                 for l in raw_order.get("lines", [])
             ],
