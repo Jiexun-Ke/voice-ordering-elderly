@@ -16,6 +16,7 @@ from .app.dialogue_manager import DialogueManager
 from .app.menu_data import MENU
 from .app.models import DraftLine, serialize_kitchen_status
 from .app.session_store import SessionStore
+from .app.stock_validation import check_draft_availability, check_draft_line
 
 app = FastAPI(title="Menu Helper Ordering", version="0.1.0")
 store = SessionStore()
@@ -189,9 +190,15 @@ def message(session_id: UUID, request: Message):
                     response = "Which menu item would you like to know about?"
         trial = deepcopy(session)
         if response is None:
+            before_line_ids = {line.line_id for line in trial.order.lines}
             result = manager.handle_utterance(trial, text)
             if any(line.quantity < 1 or line.quantity > 20 for line in trial.order.lines):
                 raise HTTPException(422, "Please choose a quantity from 1 to 20.")
+            added_line_ids = {
+                line.line_id for line in trial.order.lines
+            } - before_line_ids
+            if result.stock_conflicts and not added_line_ids and not trial.pending:
+                raise HTTPException(409, detail=result.stock_conflicts[0])
             response = result.message
             entry["session"] = trial
         entry["messages"].append({"role": "user", "text": text})
@@ -205,6 +212,9 @@ def add_line(session_id: UUID, request: Choice):
         item, options, names = checked_choices(request)
         session = entry["session"]
         line = manager._draft_to_orderline(item, DraftLine(item.id, item.name, request.quantity, options, names))
+        conflict = check_draft_line(session.order, line)
+        if conflict:
+            raise HTTPException(409, detail=conflict.detail)
         session.order.lines.append(line)
         return reply(entry, f"Added {line.quantity} × {item.name}. Total: ${session.order.total:.2f}.")
     return mutate(str(session_id), request, add)
@@ -217,6 +227,14 @@ def edit_line(session_id: UUID, line_id: UUID, request: Choice):
         if request.item_id != line.item_id:
             raise HTTPException(422, "Remove this item and add the replacement from the menu.")
         item, options, names = checked_choices(request)
+        conflict = check_draft_availability(
+            entry["session"].order,
+            item.id,
+            request.quantity,
+            exclude_line_id=line.line_id,
+        )
+        if conflict:
+            raise HTTPException(409, detail=conflict.detail)
         line.quantity, line.modifiers, line.modifier_names = request.quantity, options, names
         line.unit_price = manager._unit_price(item, options)
         return reply(entry, f"Updated {item.name}. Total: ${entry['session'].order.total:.2f}.")

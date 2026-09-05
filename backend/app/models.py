@@ -212,3 +212,4 @@ class DialogueResponse:
     order_snapshot: Optional[dict] = None
     kitchen_response: Optional[dict] = None
     receipt: Optional[dict] = None      # set only when the bill has just been paid
+    stock_conflicts: list = field(default_factory=list)

@@ -7,8 +7,21 @@ export async function requestJSON(path, { timeout = 20000, ...options } = {}) {
     const response = await fetch(path, { ...options, signal: options.signal || controller.signal });
     const data = await response.json();
     if (!response.ok) {
-      const error = new Error(typeof data.detail === 'string' ? data.detail : 'The server could not accept this request. Please check your choices.');
+      const detail = data.detail;
+      const message = typeof detail === 'string'
+        ? detail
+        : detail && typeof detail.message === 'string'
+          ? detail.message
+          : 'The server could not accept this request. Please check your choices.';
+      const error = new Error(message);
       error.status = response.status;
+      if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+        error.detail = detail;
+        error.code = detail.code;
+        error.itemId = detail.item_id;
+        error.requestedQuantity = detail.requested_quantity;
+        error.availableQuantity = detail.available_quantity;
+      }
       throw error;
     }
     return data;

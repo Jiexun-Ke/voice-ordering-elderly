@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import server
-from backend.app.kitchen_interface import reset_kitchen
+from backend.app.kitchen_interface import get_stock_status, reset_kitchen, set_stock
 
 
 @pytest.fixture
@@ -60,6 +60,85 @@ def test_invalid_choices_and_quantities_leave_order_unchanged(client):
     for values in [dict(item_id='unknown'),dict(item_id='kopi',quantity=0),dict(item_id='kopi',quantity=1.5),dict(item_id='kopi',options={'spice':'no_chilli'}),dict(item_id='nasi_lemak')]:
         assert client.post(path+'/lines',json=payload(**values)).status_code == 422
     assert client.get(path).json()['snapshot']['total_cents'] == 0
+
+
+def test_available_item_enters_cart_without_reserving_stock(client):
+    path = new(client)
+    set_stock('chicken_rice', 2)
+    response = client.post(path+'/lines', json=payload(item_id='chicken_rice', quantity=2))
+    assert response.status_code == 200
+    assert response.json()['snapshot']['lines'][0]['quantity'] == 2
+    assert get_stock_status('chicken_rice') == 2
+
+
+def test_sold_out_add_returns_structured_conflict_and_preserves_cart(client):
+    path = new(client)
+    assert client.post(path+'/lines', json=payload(item_id='fried_rice')).status_code == 200
+    set_stock('chicken_rice', 0)
+    before = client.get(path).json()['snapshot']
+    request = payload(item_id='chicken_rice')
+
+    response = client.post(path+'/lines', json=request)
+    assert response.status_code == 409
+    assert response.json()['detail'] == {
+        'code': 'stock_unavailable',
+        'message': 'Not enough stock for chicken_rice: requested 1, but only 0 available.',
+        'item_id': 'chicken_rice',
+        'requested_quantity': 1,
+        'available_quantity': 0,
+    }
+    assert client.get(path).json()['snapshot'] == before
+    assert client.post(path+'/lines', json=request).status_code == 409
+    assert client.get(path).json()['snapshot'] == before
+
+
+def test_combined_draft_quantity_and_quantity_edit_are_checked(client):
+    path = new(client)
+    set_stock('chicken_rice', 1)
+    first = client.post(path+'/lines', json=payload(item_id='chicken_rice'))
+    assert first.status_code == 200
+    before = first.json()['snapshot']
+
+    second = client.post(path+'/lines', json=payload(item_id='chicken_rice'))
+    assert second.status_code == 409
+    assert second.json()['detail']['requested_quantity'] == 2
+    assert second.json()['detail']['available_quantity'] == 1
+    assert client.get(path).json()['snapshot'] == before
+
+    line = before['lines'][0]
+    edited = client.patch(
+        path+'/lines/'+line['key'],
+        json=payload(item_id='chicken_rice', quantity=2),
+    )
+    assert edited.status_code == 409
+    assert edited.json()['detail']['requested_quantity'] == 2
+    assert client.get(path).json()['snapshot'] == before
+
+
+def test_all_unavailable_conversational_add_returns_conflict_without_mutation(client):
+    path = new(client)
+    set_stock('chicken_rice', 0)
+    before = client.get(path).json()['snapshot']
+    response = client.post(path+'/messages', json=payload(text='one chicken rice'))
+
+    assert response.status_code == 409
+    assert response.json()['detail']['item_id'] == 'chicken_rice'
+    assert client.get(path).json()['snapshot'] == before
+
+
+def test_mixed_conversational_add_keeps_available_lines(client):
+    path = new(client)
+    set_stock('chicken_rice', 0)
+    set_stock('fried_rice', 1)
+    response = client.post(
+        path+'/messages', json=payload(text='one chicken rice and one fried rice')
+    )
+
+    assert response.status_code == 200
+    snapshot = response.json()['snapshot']
+    assert [line['id'] for line in snapshot['lines']] == ['fried_rice']
+    assert 'couldn\'t add' in response.json()['message']
+    assert get_stock_status('fried_rice') == 1
 
 
 def test_greetings_and_menu_queries_do_not_add_food(client):
