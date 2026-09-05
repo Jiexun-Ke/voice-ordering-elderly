@@ -138,6 +138,8 @@ The ordering contract is:
   It returns `409` once the synchronized kitchen status is `preparing` or
   `done`; a successful cancellation restores the accepted quantity exactly.
 
+Deleting an unconfirmed line removes it immediately. Deleting a confirmed line first asks the kitchen module to cancel it and succeeds only while its status is `received`; a line in `preparing` or `done` remains on the bill.
+
 This is a local development API bound to loopback, with no public authentication or production persistence. Full startup and test instructions are in [the frontend README](../frontend/README.md).
 
 ## Running it

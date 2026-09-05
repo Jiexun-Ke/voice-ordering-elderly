@@ -48,6 +48,7 @@ Object.assign(words.en, {
   recordingHint:'Say your message, then press Done speaking. Words appear after transcription.',
   voiceReady:'Voice ready', voiceChecking:'Checking voice…', voiceOffline:'Voice unavailable · typing works', checkServices:'Check connection', saving:'Updating your order…', retryConnection:'Retry connection',
   dineIn:'Eat here', takeaway:'Takeaway', serviceType:'Where will you eat?', confirmedLine:'Confirmed with demo kitchen', pendingHint:'Please answer the question in Chat to finish this choice.',
+  cancelItem:'Cancel item', cancelReceived:'The kitchen has received this item. You can cancel it until preparation starts.',
   milk_type:'Milk', strength:'Strength', spice:'Chilli', noodle_type:'Noodle type', soup_style:'Soup or dry',
   condensed_milk:'Condensed milk', evaporated_milk:'Evaporated milk', black:'No milk', less_sweet:'Less sweet', no_sugar:'No sugar', extra_sweet:'Extra sweet', strong:'Strong', weak:'Weak',
   no_chilli:'No chilli', less_chilli:'Less chilli', normal_chilli:'Normal chilli', extra_chilli:'Extra chilli', yellow_noodle:'Yellow noodle', kway_teow:'Kway teow', bee_hoon:'Bee hoon', instant_noodle:'Instant noodle', soup:'Soup', dry:'Dry',
@@ -59,6 +60,7 @@ Object.assign(words.zh, {
   processingHint:'正在转写您的录音，请稍等。您的消息还没有发送。', voiceTimeout:'语音后端响应超时，请重试或改用打字。', recordingHint:'请说出消息，再点击“说好了”。转写完成后会显示文字。',
   voiceReady:'语音已就绪', voiceChecking:'正在检查语音……', voiceOffline:'语音未就绪，可先打字', checkServices:'检查连接', saving:'正在更新订单……', retryConnection:'重新连接',
   dineIn:'堂食', takeaway:'打包', serviceType:'用餐方式', confirmedLine:'模拟厨房已确认', pendingHint:'请到聊天页回答问题，完成这项选择。',
+  cancelItem:'取消菜品', cancelReceived:'厨房已收到这项订单。开始准备前仍可取消。',
   milk_type:'奶的种类', strength:'浓度', spice:'辣椒', noodle_type:'面条种类', soup_style:'汤面或干面', condensed_milk:'炼乳', evaporated_milk:'淡奶', black:'不加奶', less_sweet:'少糖', no_sugar:'无糖', extra_sweet:'多糖', strong:'浓', weak:'淡',
   no_chilli:'不加辣椒', less_chilli:'少辣椒', normal_chilli:'正常辣椒', extra_chilli:'多辣椒', yellow_noodle:'黄面', kway_teow:'粿条', bee_hoon:'米粉', instant_noodle:'快熟面', soup:'汤面', dry:'干面',
 });
@@ -296,7 +298,7 @@ export function createOrdering({ onHome }) {
     if(event.target.id!=='choice-form')return;event.preventDefault();if(busy)return;
     const form=event.target;const data=new FormData(form);const options=Object.fromEntries([...data].filter(([key])=>key!=='quantity'));
     const success=await runChange(()=>form.dataset.addId?order.add(form.dataset.addId,Number(data.get('quantity')),options):order.edit(form.dataset.key,Number(data.get('quantity')),options));
-    if(success){choiceDialog.close();toast(t('updated'));}
+    if(success){const added=Boolean(form.dataset.addId);choiceDialog.close();toast(t(added?'added':'updated'));}
     else choiceDialog.querySelector('#choice-error').textContent=backendError;
   });
   choiceDialog.addEventListener('close',stopSpeech);

@@ -1045,6 +1045,37 @@ class DialogueManager:
     # ------------------------------------------------------------------ #
     # Remove / change / confirm
     # ------------------------------------------------------------------ #
+    def _handle_cancel_order(self, session) -> DialogueResponse:
+        """Cancel every line that has not started preparation."""
+        session.chunk_queue.clear()
+        if not session.order.lines:
+            return DialogueResponse(
+                message="Your order is already empty. What would you like?",
+                needs_clarification=False,
+                order_snapshot=self._snapshot(session),
+            )
+
+        removed = 0
+        blocked = []
+        for line in list(session.order.lines):
+            cancelled, reason = self._try_remove_line(session, line)
+            if cancelled:
+                removed += 1
+            else:
+                blocked.append(reason)
+
+        if blocked:
+            prefix = f"Okay, I cancelled {removed} item{'s' if removed != 1 else ''}. " if removed else ""
+            message = prefix + " ".join(blocked)
+        else:
+            message = "Okay, I've cancelled your order. What would you like to start with?"
+
+        return DialogueResponse(
+            message=message,
+            needs_clarification=False,
+            order_snapshot=self._snapshot(session),
+        )
+
     def _handle_remove(self, session, transcript) -> DialogueResponse:
         if not session.order.lines:
             return DialogueResponse(
