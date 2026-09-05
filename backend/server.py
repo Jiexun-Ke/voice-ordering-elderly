@@ -13,10 +13,17 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .app.dialogue_manager import DialogueManager
-from .app.kitchen_interface import cancel_line
+from .app.kitchen_interface import (
+    advance_line_status,
+    cancel_order_line,
+    check_availability,
+    synchronize_line_status,
+    synchronize_order_status,
+)
 from .app.menu_data import MENU
-from .app.models import DraftLine
+from .app.models import DraftLine, KitchenStatus, serialize_kitchen_status
 from .app.session_store import SessionStore
+from .app.stock_validation import check_draft_availability, check_draft_line
 
 app = FastAPI(title="Menu Helper Ordering", version="0.1.0")
 store = SessionStore()
@@ -52,6 +59,7 @@ def session_for(session_id):
 
 def snapshot(entry):
     session = entry["session"]
+    synchronize_order_status(session.order)
     return {
         "session_id": session.session_id,
         "order_id": session.order.order_id,
@@ -63,7 +71,7 @@ def snapshot(entry):
             "options": line.modifiers, "option_names": line.modifier_names,
             "unit_cents": round(line.unit_price * 100),
             "subtotal_cents": round(line.subtotal * 100), "sent": line.sent,
-            "kitchen_status": line.kitchen_status,
+            "kitchen_status": serialize_kitchen_status(line.kitchen_status),
         } for line in session.order.lines],
         "total_cents": round(session.order.total * 100),
         "messages": entry["messages"], "kitchen_mode": "mock",
@@ -89,7 +97,7 @@ def mutate(session_id, request, action, resource=""):
 
 def reply(entry, message, **extra):
     entry["messages"].append({"role": "assistant", "text": message, **extra})
-    return {"message": message}
+    return {"message": message, **extra}
 
 
 def checked_choices(choice):
@@ -121,6 +129,20 @@ def line_for(entry, line_id, *, allow_sent=False):
     return line
 
 
+def cancellation_message(line, result):
+    status = result.get("status")
+    if status == "preparing":
+        stage = "already being prepared"
+    elif status == "done":
+        stage = "already ready"
+    else:
+        stage = "not available for cancellation"
+    return (
+        f"Sorry, your {line.item_name} is {stage}, so I can't cancel that one. "
+        "It'll still be on your bill."
+    )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "dialogue_ready": True, "kitchen_mode": "mock"}
@@ -128,7 +150,15 @@ def health():
 
 @app.get("/menu")
 def menu():
-    return {"items": [asdict(item) for item in MENU], "kitchen_mode": "mock"}
+    with lock:
+        items = []
+        for item in MENU:
+            payload = asdict(item)
+            availability = check_availability(item.id, 1)
+            payload["available"] = availability["available"]
+            payload["remaining_stock"] = availability["remaining_stock"]
+            items.append(payload)
+        return {"items": items, "kitchen_mode": "mock"}
 
 
 @app.post("/sessions")
@@ -190,9 +220,15 @@ def message(session_id: UUID, request: Message):
                     response = "Which menu item would you like to know about?"
         trial = deepcopy(session)
         if response is None:
+            before_line_ids = {line.line_id for line in trial.order.lines}
             result = manager.handle_utterance(trial, text)
             if any(line.quantity < 1 or line.quantity > 20 for line in trial.order.lines):
                 raise HTTPException(422, "Please choose a quantity from 1 to 20.")
+            added_line_ids = {
+                line.line_id for line in trial.order.lines
+            } - before_line_ids
+            if result.stock_conflicts and not added_line_ids and not trial.pending:
+                raise HTTPException(409, detail=result.stock_conflicts[0])
             response = result.message
             entry["session"] = trial
         entry["messages"].append({"role": "user", "text": text})
@@ -206,6 +242,9 @@ def add_line(session_id: UUID, request: Choice):
         item, options, names = checked_choices(request)
         session = entry["session"]
         line = manager._draft_to_orderline(item, DraftLine(item.id, item.name, request.quantity, options, names))
+        conflict = check_draft_line(session.order, line)
+        if conflict:
+            raise HTTPException(409, detail=conflict.detail)
         session.order.lines.append(line)
         return reply(entry, f"Added {line.quantity} × {item.name}. Total: ${session.order.total:.2f}.")
     return mutate(str(session_id), request, add)
@@ -218,6 +257,14 @@ def edit_line(session_id: UUID, line_id: UUID, request: Choice):
         if request.item_id != line.item_id:
             raise HTTPException(422, "Remove this item and add the replacement from the menu.")
         item, options, names = checked_choices(request)
+        conflict = check_draft_availability(
+            entry["session"].order,
+            item.id,
+            request.quantity,
+            exclude_line_id=line.line_id,
+        )
+        if conflict:
+            raise HTTPException(409, detail=conflict.detail)
         line.quantity, line.modifiers, line.modifier_names = request.quantity, options, names
         line.unit_price = manager._unit_price(item, options)
         return reply(entry, f"Updated {item.name}. Total: ${entry['session'].order.total:.2f}.")
@@ -227,19 +274,49 @@ def edit_line(session_id: UUID, line_id: UUID, request: Choice):
 @app.delete("/sessions/{session_id}/lines/{line_id}")
 def remove_line(session_id: UUID, line_id: UUID, request: Mutation):
     def remove(entry):
-        session = entry["session"]
         line = line_for(entry, str(line_id), allow_sent=True)
-        if line.sent:
-            result = cancel_line(session.order.order_id, line.line_id)
-            if not result["cancelled"]:
-                raise HTTPException(
-                    409,
-                    f"The kitchen has already {result['reason']}. Please ask restaurant staff for help.",
-                )
+        result = cancel_order_line(entry["session"].order, line)
+        if not result["cancelled"]:
+            raise HTTPException(409, cancellation_message(line, result))
         entry["session"].order.lines.remove(line)
-        verb = "Cancelled" if line.sent else "Removed"
-        return reply(entry, f"{verb} {line.item_name}.")
+        return reply(entry, f"Removed {line.item_name}.", line_id=line.line_id)
     return mutate(str(session_id), request, remove, str(line_id))
+
+
+@app.post(
+    "/sessions/{session_id}/lines/{line_id}/advance-status",
+    summary="Advance a mock kitchen line (local demo only)",
+)
+def advance_status(session_id: UUID, line_id: UUID, request: Mutation):
+    """Advance one accepted line to its next mock-kitchen lifecycle state.
+
+    This is intentionally a local demonstration hook, not a production kitchen
+    integration endpoint. The route accepts no target status, so only the
+    fixed received -> preparing -> done progression can be requested.
+    """
+    def advance(entry):
+        line = line_for(entry, str(line_id), allow_sent=True)
+        if not line.sent:
+            raise HTTPException(
+                409,
+                "Confirm this item before advancing its kitchen status in the local demo.",
+            )
+
+        current = synchronize_line_status(entry["session"].order, line)
+        if current is None:
+            raise HTTPException(409, "This item has no active kitchen status to advance.")
+        if current is KitchenStatus.DONE:
+            raise HTTPException(409, "This item is already done; it cannot advance further.")
+
+        advance_line_status(line.line_id)
+        status = synchronize_line_status(entry["session"].order, line)
+        return reply(
+            entry,
+            f"{line.item_name} is now {serialize_kitchen_status(status)}.",
+            kitchen_status=serialize_kitchen_status(status),
+        )
+
+    return mutate(str(session_id), request, advance, f"{line_id}:advance-status")
 
 
 @app.post("/sessions/{session_id}/confirm")

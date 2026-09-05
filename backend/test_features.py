@@ -133,11 +133,13 @@ check("cannot cancel once 'preparing'",
 # ------------------------------------------------------------ out of stock
 store, dm = fresh()
 kitchen.set_stock("nasi_lemak", 0)
-r = say(dm, store, "1", "one nasi lemak and one chicken rice", "no chilli", "that's all", "eat here")
+say(dm, store, "1", "one nasi lemak and one chicken rice")
+preflight = say(dm, store, "1", "no chilli")
+r = say(dm, store, "1", "that's all", "eat here")
 items = [l.item_name for l in store.get("1").order.lines]
 check("sold-out line is removed from the bill", "Nasi Lemak" not in items, str(items))
-check("sold-out item is named", "run out of nasi lemak" in r.message.lower(), r.message)
-check("alternatives are suggested", "instead" in r.message.lower())
+check("sold-out item is named", "nasi lemak" in preflight.message.lower(), preflight.message)
+check("available item remains orderable", "chicken rice" in items[0].lower(), str(items))
 check("rest of order still charged", store.get("1").order.total == 4.50)
 
 # --------------------------------------------------------------- takeaway

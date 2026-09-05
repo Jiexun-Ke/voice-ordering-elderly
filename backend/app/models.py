@@ -19,6 +19,69 @@ class ModifierType(str, Enum):
     SPICE = "spice"
 
 
+class KitchenStatus(str, Enum):
+    """The lifecycle of an individual line after it reaches the kitchen."""
+
+    ORDER_RECEIVED = "received"
+    IN_PREPARATION = "preparing"
+    DONE = "done"
+
+    def can_transition_to(self, target) -> bool:
+        """Return whether ``target`` is the next lifecycle state."""
+        target = normalize_kitchen_status(target)
+        return (
+            (self is KitchenStatus.ORDER_RECEIVED and target is KitchenStatus.IN_PREPARATION)
+            or (self is KitchenStatus.IN_PREPARATION and target is KitchenStatus.DONE)
+        )
+
+
+def normalize_kitchen_status(value) -> Optional[KitchenStatus]:
+    """Convert a wire value or enum member into the canonical enum."""
+    if value is None:
+        return None
+    if isinstance(value, KitchenStatus):
+        return value
+    try:
+        return KitchenStatus(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Unknown kitchen status: {value!r}") from exc
+
+
+def serialize_kitchen_status(value) -> Optional[str]:
+    """Return the existing API value for a kitchen status."""
+    status = normalize_kitchen_status(value)
+    return status.value if status is not None else None
+
+
+def validate_kitchen_transition(current, target) -> KitchenStatus:
+    """Validate one forward kitchen lifecycle transition.
+
+    ``None -> ORDER_RECEIVED`` is the initial assignment. Repeating a state
+    is intentionally not a transition; callers that need idempotency should
+    avoid applying the same operation twice rather than treating it as a
+    forward move.
+    """
+    current = normalize_kitchen_status(current)
+    target = normalize_kitchen_status(target)
+    if current is None and target is KitchenStatus.ORDER_RECEIVED:
+        return target
+    if current is not None and current.can_transition_to(target):
+        return target
+    current_value = serialize_kitchen_status(current) or "unset"
+    target_value = serialize_kitchen_status(target) or "unset"
+    raise ValueError(f"Invalid kitchen status transition: {current_value} -> {target_value}")
+
+
+def next_kitchen_status(current) -> KitchenStatus:
+    """Return the next lifecycle state, rejecting terminal or invalid input."""
+    current = normalize_kitchen_status(current)
+    if current is KitchenStatus.ORDER_RECEIVED:
+        return validate_kitchen_transition(current, KitchenStatus.IN_PREPARATION)
+    if current is KitchenStatus.IN_PREPARATION:
+        return validate_kitchen_transition(current, KitchenStatus.DONE)
+    raise ValueError("A line without an active kitchen status has no next state")
+
+
 @dataclass
 class ModifierOption:
     id: str
@@ -64,7 +127,10 @@ class OrderLine:
     modifiers: dict = field(default_factory=dict)         # modifier_type -> option_id
     modifier_names: dict = field(default_factory=dict)    # modifier_type -> option name (for speech/display)
     sent: bool = False                    # already handed to the kitchen?
-    kitchen_status: Optional[str] = None  # received | preparing | done
+    kitchen_status: Optional[KitchenStatus] = None
+
+    def __post_init__(self):
+        self.kitchen_status = normalize_kitchen_status(self.kitchen_status)
 
     @property
     def subtotal(self) -> float:
@@ -146,3 +212,4 @@ class DialogueResponse:
     order_snapshot: Optional[dict] = None
     kitchen_response: Optional[dict] = None
     receipt: Optional[dict] = None      # set only when the bill has just been paid
+    stock_conflicts: list = field(default_factory=list)
