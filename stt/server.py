@@ -131,7 +131,9 @@ async def transcribe(
     cat = _catalogue(catalogue)
     suffix = Path(audio.filename or "clip.wav").suffix or ".wav"
 
-    raw = Path(tempfile.mkstemp(suffix=suffix, prefix="upload_")[1])
+    fd, raw_name = tempfile.mkstemp(suffix=suffix, prefix="upload_")
+    os.close(fd)
+    raw = Path(raw_name)
     wav = None
     try:
         raw.write_bytes(await audio.read())

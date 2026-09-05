@@ -14,7 +14,7 @@ Both ASR engine families want 16 kHz mono, matching SAMPLE_RATE in
 voice_ordering.py.
 """
 
-
+import os
 import shutil
 import subprocess
 import tempfile
@@ -102,9 +102,12 @@ def to_wav16k_mono(source: str | Path, dest: str | Path | None = None) -> Path:
     if rate != SAMPLE_RATE:
         mono = _resample(mono, rate, SAMPLE_RATE)
 
-    dest = Path(dest) if dest else Path(
-        tempfile.mkstemp(suffix=".wav", prefix="stt_")[1]
-    )
+    if dest:
+        dest = Path(dest)
+    else:
+        fd, dest_name = tempfile.mkstemp(suffix=".wav", prefix="stt_")
+        os.close(fd)
+        dest = Path(dest_name)
     sf.write(str(dest), mono, SAMPLE_RATE, subtype="PCM_16")
     return dest
 
