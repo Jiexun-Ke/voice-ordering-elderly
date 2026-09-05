@@ -17,6 +17,7 @@ Everything else is treated as customer speech.
 from app import kitchen_interface as kitchen
 from app.dialogue_manager import DialogueManager
 from app.menu_data import MENU
+from app.models import normalize_kitchen_status, serialize_kitchen_status
 from app.session_store import SessionStore
 
 STORE_PATH = "table_sessions.json"
@@ -30,7 +31,7 @@ def show_bill(store, table_id):
     print(f"[table {table_id}] current tab:")
     for line in bill["lines"]:
         mods = ", ".join(line["modifiers"].values())
-        status = line["kitchen_status"] or "not sent"
+        status = serialize_kitchen_status(line["kitchen_status"]) or "not sent"
         print(f"    {line['quantity']} x {line['item']}"
               f"{f' ({mods})' if mods else ''}  ${line['subtotal']:.2f}   [{status}]")
     if bill["takeaway"] is not None:
@@ -79,8 +80,10 @@ def main():
         if lowered == "kitchen":
             session = store.get(table_id)
             for line in session.order.lines:
-                status = kitchen.get_line_status(session.order.order_id, line.line_id)
-                print(f"    {line.item_name}: {status or 'not sent'}")
+                status = normalize_kitchen_status(
+                    kitchen.get_line_status(session.order.order_id, line.line_id)
+                )
+                print(f"    {line.item_name}: {serialize_kitchen_status(status) or 'not sent'}")
             continue
 
         if lowered == "ready":
@@ -90,10 +93,10 @@ def main():
                 print("    nothing with the kitchen yet.")
                 continue
             line = pending_lines[0]
-            new_status = kitchen.advance_line_status(line.line_id)
+            new_status = normalize_kitchen_status(kitchen.advance_line_status(line.line_id))
             line.kitchen_status = new_status
             store.save()
-            print(f"    {line.item_name} -> {new_status}")
+            print(f"    {line.item_name} -> {serialize_kitchen_status(new_status)}")
             continue
 
         response = dm.handle_utterance(store.get(table_id), text)

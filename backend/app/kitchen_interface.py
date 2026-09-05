@@ -50,7 +50,8 @@ What we expect back:
 Every accepted line moves through:  received -> preparing -> done
 
     get_line_status(order_id, line_id) -> str | None
-    cancel_line(order_id, line_id)     -> {"cancelled": bool, "status": str, "reason": str}
+    cancel_line(order_id, line_id)     -> {"line_id": str, "cancelled": bool,
+                                            "status": str, "reason": str}
 
 A line can only be cancelled while it is still "received". Once the kitchen
 has started cooking ("preparing") or finished ("done"), cancellation is
@@ -62,20 +63,35 @@ send_order_to_kitchen(), get_line_status() and cancel_line() with real calls
 JSON shape. Nothing else in this codebase needs to change.
 --------------------------------------------------------------------------
 """
-from .models import Order
+from .models import (
+    KitchenStatus,
+    Order,
+    next_kitchen_status,
+    normalize_kitchen_status,
+    serialize_kitchen_status,
+)
 
 # Dummy stock levels, standing in for the kitchen's real inventory store.
-_STOCK = {
+_DEFAULT_STOCK = {
     "beef_noodles": 15, "fishball_noodles": 20, "wonton_noodles": 18,
     "chicken_rice": 25, "nasi_lemak": 20, "fried_rice": 22,
     "roti_prata": 30, "curry_puff": 40,
     "kopi": 50, "teh": 50, "barley": 30, "soya_milk": 30,
 }
+_STOCK = dict(_DEFAULT_STOCK)
 
 # line_id -> status, standing in for the kitchen's ticket board.
-_LINE_STATUS: dict[str, str] = {}
+_LINE_STATUS: dict[str, KitchenStatus] = {}
+# line_id -> (order_id, item_id, accepted_quantity), used for exact restoration.
+_LINE_TICKETS: dict[str, tuple[str, str, int]] = {}
+# A cancelled ticket remains recorded so a repeated cancellation is idempotent.
+_CANCELLED_LINES: set[tuple[str, str]] = set()
 
-STATUS_FLOW = ["received", "preparing", "done"]
+STATUS_FLOW = [
+    KitchenStatus.ORDER_RECEIVED,
+    KitchenStatus.IN_PREPARATION,
+    KitchenStatus.DONE,
+]
 
 
 def order_to_kitchen_payload(order: Order, lines=None) -> dict:
@@ -97,6 +113,39 @@ def order_to_kitchen_payload(order: Order, lines=None) -> dict:
     }
 
 
+def get_stock_status(item_id: str) -> int:
+    """Return current stock for an item; unknown menu items have zero stock."""
+    return _STOCK.get(item_id, 0)
+
+
+def get_all_stock() -> dict[str, int]:
+    """Return a copy of the current stock table."""
+    return dict(_STOCK)
+
+
+def _validate_quantity(quantity: int) -> int:
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 0:
+        raise ValueError("quantity must be a non-negative integer")
+    return quantity
+
+
+def check_availability(item_id: str, quantity: int) -> dict:
+    """Check stock without changing it.
+
+    ``remaining_stock`` is the current quantity, including when the request
+    cannot be fulfilled. Unknown item IDs are unavailable even for a zero
+    quantity request.
+    """
+    quantity = _validate_quantity(quantity)
+    remaining_stock = get_stock_status(item_id)
+    return {
+        "item_id": item_id,
+        "requested_quantity": quantity,
+        "available": item_id in _STOCK and remaining_stock >= quantity,
+        "remaining_stock": remaining_stock,
+    }
+
+
 def send_order_to_kitchen(order: Order, lines=None) -> dict:
     """
     MOCK implementation standing in for the teammate's kitchen module.
@@ -108,21 +157,37 @@ def send_order_to_kitchen(order: Order, lines=None) -> dict:
     line_results = []
     all_available = True
     for line in payload["lines"]:
-        available_stock = _STOCK.get(line["item_id"], 0)
-        ok = available_stock >= line["quantity"]
-        if ok:
-            _STOCK[line["item_id"]] -= line["quantity"]
-            _LINE_STATUS[line["line_id"]] = "received"
+        line_id = line["line_id"]
+        ticket = _LINE_TICKETS.get(line_id)
+        if ticket is not None and ticket[0] == payload["order_id"] and line_id in _LINE_STATUS:
+            # A retry of the same kitchen handoff is a read, not a new sale.
+            item_id = ticket[1]
+            requested_quantity = ticket[2]
+            ok = True
+            remaining_stock = get_stock_status(item_id)
         else:
+            requested_quantity = _validate_quantity(line["quantity"])
+            availability = check_availability(line["item_id"], requested_quantity)
+            ok = availability["available"]
+            remaining_stock = availability["remaining_stock"]
+            if ok:
+                remaining_stock = remaining_stock - requested_quantity
+                _STOCK[line["item_id"]] = remaining_stock
+                _LINE_STATUS[line_id] = KitchenStatus.ORDER_RECEIVED
+                _LINE_TICKETS[line_id] = (
+                    payload["order_id"], line["item_id"], requested_quantity
+                )
+                _CANCELLED_LINES.discard((payload["order_id"], line_id))
+        if not ok:
             all_available = False
         line_results.append({
-            "line_id": line["line_id"],
+            "line_id": line_id,
             "item_id": line["item_id"],
             "name": line["name"],
-            "requested_quantity": line["quantity"],
+            "requested_quantity": requested_quantity,
             "available": ok,
-            "remaining_stock": _STOCK.get(line["item_id"], 0),
-            "status": _LINE_STATUS.get(line["line_id"]),
+            "remaining_stock": remaining_stock if ok else get_stock_status(line["item_id"]),
+            "status": serialize_kitchen_status(_LINE_STATUS.get(line_id)),
         })
     return {
         "order_id": payload["order_id"],
@@ -132,7 +197,64 @@ def send_order_to_kitchen(order: Order, lines=None) -> dict:
 
 
 def get_line_status(order_id: str, line_id: str):
-    return _LINE_STATUS.get(line_id)
+    # The kitchen integration contract continues to expose wire strings.
+    ticket = _LINE_TICKETS.get(line_id)
+    if ticket is not None and ticket[0] != order_id:
+        return None
+    return serialize_kitchen_status(_LINE_STATUS.get(line_id))
+
+
+def synchronize_line_status(order: Order, line) -> KitchenStatus | None:
+    """Refresh an accepted order line from the current kitchen ticket state."""
+    if not line.sent:
+        line.kitchen_status = None
+        return None
+    line.kitchen_status = normalize_kitchen_status(
+        get_line_status(order.order_id, line.line_id)
+    )
+    return line.kitchen_status
+
+
+def synchronize_order_status(order: Order) -> None:
+    """Refresh every accepted line before an API snapshot is presented."""
+    for line in order.lines:
+        synchronize_line_status(order, line)
+
+
+def cancel_order_line(order: Order, line) -> dict:
+    """Synchronize a line and apply the shared cancellation status gate.
+
+    Draft lines never reached the kitchen and can be removed directly. Sent
+    lines are refreshed from the kitchen before ``cancel_line`` is called, so
+    HTTP and conversational cancellation cannot rely on stale local state.
+    """
+    if not line.sent:
+        return {
+            "line_id": line.line_id,
+            "cancelled": True,
+            "status": None,
+            "reason": "not sent to kitchen",
+        }
+
+    status = normalize_kitchen_status(get_line_status(order.order_id, line.line_id))
+    line.kitchen_status = status
+    if status is KitchenStatus.ORDER_RECEIVED:
+        result = cancel_line(order.order_id, line.line_id)
+        line.kitchen_status = normalize_kitchen_status(result.get("status"))
+        return result
+
+    if status is KitchenStatus.IN_PREPARATION:
+        reason = "already being prepared"
+    elif status is KitchenStatus.DONE:
+        reason = "already prepared"
+    else:
+        reason = "kitchen status unavailable"
+    return {
+        "line_id": line.line_id,
+        "cancelled": False,
+        "status": serialize_kitchen_status(status),
+        "reason": reason,
+    }
 
 
 def cancel_line(order_id: str, line_id: str) -> dict:
@@ -140,17 +262,50 @@ def cancel_line(order_id: str, line_id: str) -> dict:
     Cancellable only while still 'received'. Once the kitchen has started
     cooking, the food exists and the cancellation is refused.
     """
+    key = (order_id, line_id)
+    ticket = _LINE_TICKETS.get(line_id)
+    if key in _CANCELLED_LINES:
+        return {
+            "line_id": line_id,
+            "cancelled": True,
+            "status": "received",
+            "reason": "already cancelled",
+        }
+    if ticket is None or ticket[0] != order_id:
+        # Never reached the kitchen, so there is nothing to cancel there.
+        return {
+            "line_id": line_id,
+            "cancelled": True,
+            "status": None,
+            "reason": "not sent to kitchen",
+        }
     status = _LINE_STATUS.get(line_id)
     if status is None:
-        # Never reached the kitchen, so there is nothing to cancel there.
-        return {"cancelled": True, "status": None, "reason": "not sent to kitchen"}
-    if status == "received":
+        return {
+            "line_id": line_id,
+            "cancelled": True,
+            "status": None,
+            "reason": "already cancelled",
+        }
+    if status is KitchenStatus.ORDER_RECEIVED:
         _LINE_STATUS.pop(line_id, None)
-        return {"cancelled": True, "status": "received", "reason": "cancelled before preparation"}
+        _STOCK[ticket[1]] = get_stock_status(ticket[1]) + ticket[2]
+        _CANCELLED_LINES.add(key)
+        return {
+            "line_id": line_id,
+            "cancelled": True,
+            "status": serialize_kitchen_status(status),
+            "reason": "cancelled before preparation",
+        }
     return {
+        "line_id": line_id,
         "cancelled": False,
-        "status": status,
-        "reason": "already being prepared" if status == "preparing" else "already prepared",
+        "status": serialize_kitchen_status(status),
+        "reason": (
+            "already being prepared"
+            if status is KitchenStatus.IN_PREPARATION
+            else "already prepared"
+        ),
     }
 
 
@@ -162,27 +317,31 @@ def advance_line_status(line_id: str) -> str | None:
     current = _LINE_STATUS.get(line_id)
     if current is None:
         return None
-    idx = STATUS_FLOW.index(current)
-    if idx < len(STATUS_FLOW) - 1:
-        _LINE_STATUS[line_id] = STATUS_FLOW[idx + 1]
-    return _LINE_STATUS[line_id]
+    if current is not KitchenStatus.DONE:
+        _LINE_STATUS[line_id] = next_kitchen_status(current)
+    return serialize_kitchen_status(_LINE_STATUS[line_id])
 
 
 def reset_kitchen(stock: dict | None = None) -> None:
     """Reset stock and the ticket board, so demo scripts start from a clean slate."""
     global _STOCK
     _LINE_STATUS.clear()
+    _LINE_TICKETS.clear()
+    _CANCELLED_LINES.clear()
     if stock is not None:
+        if any(
+            isinstance(quantity, bool)
+            or not isinstance(quantity, int)
+            or quantity < 0
+            for quantity in stock.values()
+        ):
+            raise ValueError("stock quantities must be non-negative integers")
         _STOCK = dict(stock)
     else:
-        _STOCK = {
-            "beef_noodles": 15, "fishball_noodles": 20, "wonton_noodles": 18,
-            "chicken_rice": 25, "nasi_lemak": 20, "fried_rice": 22,
-            "roti_prata": 30, "curry_puff": 40,
-            "kopi": 50, "teh": 50, "barley": 30, "soya_milk": 30,
-        }
+        _STOCK = dict(_DEFAULT_STOCK)
 
 
 def set_stock(item_id: str, quantity: int) -> None:
     """Force a stock level, for testing the out-of-stock path."""
+    _validate_quantity(quantity)
     _STOCK[item_id] = quantity

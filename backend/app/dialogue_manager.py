@@ -26,7 +26,7 @@ from .intent import (
     is_tentative,
     wants_default,
 )
-from .kitchen_interface import cancel_line, send_order_to_kitchen
+from .kitchen_interface import cancel_order_line, send_order_to_kitchen
 from .matcher import (
     extract_quantity,
     match_category,
@@ -36,7 +36,15 @@ from .matcher import (
     strip_matched_form,
 )
 from .menu_data import CATEGORY_ALIASES
-from .models import DialogueResponse, DraftLine, PendingClarification
+from .models import (
+    DialogueResponse,
+    DraftLine,
+    KitchenStatus,
+    PendingClarification,
+    normalize_kitchen_status,
+    serialize_kitchen_status,
+)
+from .stock_validation import StockConflict, check_draft_availability, check_draft_line
 
 MAX_RETRIES = 2
 AMBIGUITY_MARGIN = 15  # if top-2 item scores are this close, treat as ambiguous
@@ -140,10 +148,26 @@ class DialogueManager:
         if intent == "pay_bill":
             return self._handle_pay_bill(session)
         if intent == "cancel_order":
-            session.order.lines.clear()
+            removed_lines, blocked_lines = [], []
+            for line in list(session.order.lines):
+                removed, _ = self._try_remove_line(session, line)
+                (removed_lines if removed else blocked_lines).append(line)
             session.chunk_queue.clear()
+            if not any(line.sent for line in session.order.lines):
+                session.order.status = "in_progress"
+            self._persist(session)
+
+            if blocked_lines:
+                blocked_names = ", ".join(dict.fromkeys(line.item_name for line in blocked_lines))
+                if removed_lines:
+                    message = f"I removed {len(removed_lines)} cancellable item(s), but I couldn't cancel {blocked_names}. "
+                else:
+                    message = f"I couldn't cancel {blocked_names}. "
+                message += "The kitchen has already started or finished those items, so they stay on your bill."
+            else:
+                message = "Okay, I've cleared your order. What would you like to start with?"
             return DialogueResponse(
-                message="Okay, I've cleared your order. What would you like to start with?",
+                message=message,
                 needs_clarification=False,
                 order_snapshot=self._snapshot(session),
             )
@@ -189,7 +213,7 @@ class DialogueManager:
         if order_obj.get("takeaway"):
             session.order.takeaway = True
 
-        added, not_found = [], []
+        added, not_found, stock_conflicts = [], [], []
         raw_lines = order_obj.get("lines", [])
         for index, raw_line in enumerate(raw_lines):
             canonical = str(raw_line.get("canonical", "")).upper()
@@ -231,20 +255,33 @@ class DialogueManager:
                     self._stt_line_as_text(rest) for rest in raw_lines[index + 1:]
                 ]
                 session.chunk_queue = [t for t in leftovers if t] + session.chunk_queue
-                msg = (self._added_message(added) + " " if added else "") + payload.question
+                conflict_note = " ".join(
+                    self._stock_conflict_message(line, conflict)
+                    for line, conflict in stock_conflicts
+                )
+                msg = (self._added_message(added) + " " if added else "")
+                msg += (conflict_note + " ") if conflict_note else ""
+                msg += payload.question
                 return DialogueResponse(
                     message=msg.strip(),
                     needs_clarification=True,
                     order_snapshot=self._snapshot(session),
+                    stock_conflicts=[conflict.detail for _, conflict in stock_conflicts],
                 )
-            session.order.lines.append(payload)
-            added.append(payload)
+            conflict = self._append_draft_line(session, payload)
+            if conflict:
+                stock_conflicts.append((payload, conflict))
+            else:
+                added.append(payload)
 
         parts = []
         if added:
             parts.append(self._added_message(added))
         if not_found:
             parts.append(f"Sorry, we don't have {', '.join(not_found)} on the menu.")
+        if stock_conflicts:
+            parts.extend(self._stock_conflict_message(line, conflict)
+                         for line, conflict in stock_conflicts)
         if not added and not not_found:
             parts.append("Sorry, I didn't catch an item there.")
         parts.append("Anything else, or shall I confirm your order?")
@@ -253,6 +290,7 @@ class DialogueManager:
             message=" ".join(parts),
             needs_clarification=False,
             order_snapshot=self._snapshot(session),
+            stock_conflicts=[conflict.detail for _, conflict in stock_conflicts],
         )
 
     @staticmethod
@@ -271,8 +309,11 @@ class DialogueManager:
     # ------------------------------------------------------------------ #
     # Adding items
     # ------------------------------------------------------------------ #
-    def _process_chunk_queue(self, session, prior_added=None, prefix_note="") -> DialogueResponse:
+    def _process_chunk_queue(
+        self, session, prior_added=None, prefix_note="", prior_stock_conflicts=None
+    ) -> DialogueResponse:
         added = list(prior_added) if prior_added else []
+        stock_conflicts = list(prior_stock_conflicts) if prior_stock_conflicts else []
         not_found = []
         off_topic_seen = False
 
@@ -281,7 +322,13 @@ class DialogueManager:
             kind, payload = self._resolve_chunk_into_line(chunk)
             if kind == "pending":
                 session.pending = payload
+                conflict_note = " ".join(
+                    self._stock_conflict_message(line, conflict)
+                    for line, conflict in stock_conflicts
+                )
                 msg = prefix_note
+                if conflict_note:
+                    msg += conflict_note + " "
                 if added:
                     msg += self._added_message(added) + " "
                 msg += payload.question
@@ -289,6 +336,7 @@ class DialogueManager:
                     message=msg.strip(),
                     needs_clarification=True,
                     order_snapshot=self._snapshot(session),
+                    stock_conflicts=[conflict.detail for conflict in stock_conflicts],
                 )
             elif kind == "not_found":
                 not_found.append(payload)
@@ -298,8 +346,11 @@ class DialogueManager:
                 # Neither is a menu miss — acknowledge warmly, don't apologize.
                 off_topic_seen = True
             else:
-                session.order.lines.append(payload)
-                added.append(payload)
+                conflict = self._append_draft_line(session, payload)
+                if conflict:
+                    stock_conflicts.append((payload, conflict))
+                else:
+                    added.append(payload)
 
         msg = prefix_note
         if added:
@@ -308,6 +359,9 @@ class DialogueManager:
             msg += "Alright! "
         if not_found:
             msg += f"Sorry, we don't have '{', '.join(not_found)}' on the menu. "
+        if stock_conflicts:
+            msg += " ".join(self._stock_conflict_message(line, conflict)
+                             for line, conflict in stock_conflicts) + " "
         if not added and not not_found and not off_topic_seen:
             msg += "Sorry, I didn't catch an item there. "
         msg += "Anything else, or shall I confirm your order?"
@@ -315,6 +369,7 @@ class DialogueManager:
             message=msg.strip(),
             needs_clarification=False,
             order_snapshot=self._snapshot(session),
+            stock_conflicts=[conflict.detail for _, conflict in stock_conflicts],
         )
 
     def _resolve_chunk_into_line(self, chunk: str):
@@ -522,6 +577,30 @@ class DialogueManager:
             modifier_names=dict(draft.modifier_names),
         )
 
+    def _append_draft_line(self, session, line) -> StockConflict | None:
+        """Append only after the shared, read-only draft stock preflight."""
+        conflict = check_draft_line(session.order, line)
+        if conflict is None:
+            session.order.lines.append(line)
+        return conflict
+
+    @staticmethod
+    def _stock_conflict_message(line, conflict: StockConflict) -> str:
+        available = conflict.available_quantity
+        quantity = "no" if available == 0 else str(available)
+        return (
+            f"Sorry, I couldn't add {line.quantity} × {line.item_name}; "
+            f"only {quantity} is available."
+        )
+
+    def _stock_conflict_response(self, session, line, conflict: StockConflict) -> DialogueResponse:
+        return DialogueResponse(
+            message=self._stock_conflict_message(line, conflict),
+            needs_clarification=False,
+            order_snapshot=self._snapshot(session),
+            stock_conflicts=[conflict.detail],
+        )
+
     # ------------------------------------------------------------------ #
     # Resolving a pending clarification
     # ------------------------------------------------------------------ #
@@ -551,7 +630,9 @@ class DialogueManager:
         # trapping them in a loop of the same question.
         if control == "confirm_order" and not self._mentions_any_modifier(transcript):
             if pending.kind in ("modifier_missing", "modifier_ambiguous", "modifier_batch"):
-                note = self._finalize_pending_with_defaults(session)
+                note, line, conflict = self._finalize_pending_with_defaults(session)
+                if conflict:
+                    return self._stock_conflict_response(session, line, conflict)
                 confirmation = self._confirm_order(session)
                 confirmation.message = note + confirmation.message
                 return confirmation
@@ -559,7 +640,9 @@ class DialogueManager:
                 # "ok lah, that's all" carries a real yes — honour it. Anything
                 # weaker is not consent, so the tentative item is dropped.
                 if detect_yes_no(transcript) == "yes":
-                    note = self._finalize_pending_with_defaults(session)
+                    note, line, conflict = self._finalize_pending_with_defaults(session)
+                    if conflict:
+                        return self._stock_conflict_response(session, line, conflict)
                     confirmation = self._confirm_order(session)
                     confirmation.message = note + confirmation.message
                     return confirmation
@@ -589,7 +672,7 @@ class DialogueManager:
             order_snapshot=self._snapshot(session),
         )
 
-    def _finalize_pending_with_defaults(self, session) -> str:
+    def _finalize_pending_with_defaults(self, session) -> tuple:
         """
         Close out a half-specified item using each group's default, add it to
         the cart, and return a short note naming what was chosen so the
@@ -599,7 +682,7 @@ class DialogueManager:
         draft = pending.draft
         session.pending = None
         if draft is None or draft.item_id is None:
-            return ""
+            return "", None, None
         item = self._get_item(draft.item_id)
         chosen = []
         for group in item.modifier_groups:
@@ -609,10 +692,13 @@ class DialogueManager:
             draft.modifiers[group.type.value] = default_opt.id
             draft.modifier_names[group.type.value] = default_opt.name
             chosen.append(default_opt.name)
-        session.order.lines.append(self._draft_to_orderline(item, draft))
+        line = self._draft_to_orderline(item, draft)
+        conflict = self._append_draft_line(session, line)
         if chosen:
-            return f"For the {item.name} I've gone with {', '.join(chosen)}. "
-        return ""
+            note = f"For the {item.name} I've gone with {', '.join(chosen)}. "
+        else:
+            note = ""
+        return note, line, conflict
 
     def _resolve_confirm_item(self, session, transcript) -> DialogueResponse:
         """Yes/no answer to 'would you like me to add X?' after a hedged mention."""
@@ -660,7 +746,12 @@ class DialogueManager:
                 needs_clarification=True,
                 order_snapshot=self._snapshot(session),
             )
-        session.order.lines.append(payload)
+        conflict = self._append_draft_line(session, payload)
+        if conflict:
+            return self._process_chunk_queue(
+                session,
+                prior_stock_conflicts=[(payload, conflict)],
+            )
         return self._process_chunk_queue(session, prior_added=[payload])
 
     def _resolve_item_ambiguous(self, session, transcript) -> DialogueResponse:
@@ -699,7 +790,12 @@ class DialogueManager:
                 needs_clarification=True,
                 order_snapshot=self._snapshot(session),
             )
-        session.order.lines.append(payload)
+        conflict = self._append_draft_line(session, payload)
+        if conflict:
+            return self._process_chunk_queue(
+                session,
+                prior_stock_conflicts=[(payload, conflict)],
+            )
         return self._process_chunk_queue(session, prior_added=[payload])
 
     def _resolve_modifier_pending(self, session, transcript) -> DialogueResponse:
@@ -833,7 +929,13 @@ class DialogueManager:
                 needs_clarification=True,
                 order_snapshot=self._snapshot(session),
             )
-        session.order.lines.append(payload)
+        conflict = self._append_draft_line(session, payload)
+        if conflict:
+            return self._process_chunk_queue(
+                session,
+                prefix_note=fallback_note,
+                prior_stock_conflicts=[(payload, conflict)],
+            )
         return self._process_chunk_queue(session, prior_added=[payload], prefix_note=fallback_note)
 
     def _resolve_remove_ambiguous(self, session, transcript) -> DialogueResponse:
@@ -910,6 +1012,15 @@ class DialogueManager:
             )
         new_item = pending.item_candidates[0]
         qty = target.quantity
+        conflict = check_draft_availability(
+            session.order, new_item.id, qty, exclude_line_id=target.line_id
+        )
+        if conflict:
+            candidate = self._draft_to_orderline(new_item, DraftLine(
+                item_id=new_item.id, item_name=new_item.name, quantity=qty
+            ))
+            return self._stock_conflict_response(session, candidate, conflict)
+        target_index = session.order.lines.index(target)
         session.order.lines.remove(target)
         draft = DraftLine(item_id=new_item.id, item_name=new_item.name, quantity=qty)
         stripped = strip_matched_form(transcript, new_item)
@@ -921,7 +1032,10 @@ class DialogueManager:
                 needs_clarification=True,
                 order_snapshot=self._snapshot(session),
             )
-        session.order.lines.append(payload)
+        conflict = self._append_draft_line(session, payload)
+        if conflict:
+            session.order.lines.insert(target_index, target)
+            return self._stock_conflict_response(session, payload, conflict)
         return DialogueResponse(
             message=f"Changed it to {new_item.name}.",
             needs_clarification=False,
@@ -982,13 +1096,20 @@ class DialogueManager:
             self._persist(session)
             return True, ""
 
-        result = cancel_line(session.order.order_id, line.line_id)
+        result = cancel_order_line(session.order, line)
         if result["cancelled"]:
             session.order.lines.remove(line)
             self._persist(session)
             return True, ""
 
-        stage = "already being prepared" if result["status"] == "preparing" else "already ready"
+        status = normalize_kitchen_status(result.get("status"))
+        stage = (
+            "already being prepared"
+            if status is KitchenStatus.IN_PREPARATION
+            else "already ready"
+            if status is KitchenStatus.DONE
+            else "not available for cancellation"
+        )
         return False, (
             f"Sorry, your {line.item_name} is {stage}, so I can't cancel that one. "
             "It'll still be on your bill. Anything else?"
@@ -1066,6 +1187,15 @@ class DialogueManager:
             if len(session.order.lines) == 1:
                 line = session.order.lines[0]
                 qty = line.quantity
+                conflict = check_draft_availability(
+                    session.order, new_item.id, qty, exclude_line_id=line.line_id
+                )
+                if conflict:
+                    candidate = self._draft_to_orderline(new_item, DraftLine(
+                        item_id=new_item.id, item_name=new_item.name, quantity=qty
+                    ))
+                    return self._stock_conflict_response(session, candidate, conflict)
+                line_index = session.order.lines.index(line)
                 session.order.lines.remove(line)
                 draft = DraftLine(item_id=new_item.id, item_name=new_item.name, quantity=qty)
                 stripped = strip_matched_form(transcript, new_item)
@@ -1077,7 +1207,10 @@ class DialogueManager:
                         needs_clarification=True,
                         order_snapshot=self._snapshot(session),
                     )
-                session.order.lines.append(payload)
+                conflict = self._append_draft_line(session, payload)
+                if conflict:
+                    session.order.lines.insert(line_index, line)
+                    return self._stock_conflict_response(session, payload, conflict)
                 return DialogueResponse(
                     message=f"Changed your order to {new_item.name}.",
                     needs_clarification=False,
@@ -1148,14 +1281,21 @@ class DialogueManager:
                 continue
             if result["available"]:
                 line.sent = True
-                line.kitchen_status = result.get("status") or "received"
+                line.kitchen_status = normalize_kitchen_status(
+                    result.get("status") or KitchenStatus.ORDER_RECEIVED
+                )
             else:
                 # Drop it from the bill so they're never charged for food that
                 # can't be made.
                 unavailable_names.append(line.item_name)
                 session.order.lines.remove(line)
 
-        session.order.status = "sent_to_kitchen"
+        accepted_lines = [line for line in new_lines if line.sent]
+        session.order.status = (
+            "sent_to_kitchen"
+            if accepted_lines or any(line.sent for line in session.order.lines)
+            else "in_progress"
+        )
 
         parts = []
         if unavailable_names:
@@ -1164,7 +1304,7 @@ class DialogueManager:
             suggestions = self._suggest_alternatives(unavailable_names)
             if suggestions:
                 parts.append(f"Would you like {suggestions} instead?")
-        if any(l.sent for l in session.order.lines):
+        if accepted_lines:
             parts.append("The rest of your order has been sent to the kitchen."
                          if unavailable_names else "Your order has been sent to the kitchen.")
         parts.append(f"Your total so far is ${session.order.total:.2f}.")
@@ -1195,7 +1335,10 @@ class DialogueManager:
             f"{l.quantity} x {l.item_name} ${l.subtotal:.2f}" for l in session.order.lines
         )
         still_cooking = [l.item_name for l in session.order.lines
-                         if l.kitchen_status in ("received", "preparing")]
+                         if l.kitchen_status in (
+                             KitchenStatus.ORDER_RECEIVED,
+                             KitchenStatus.IN_PREPARATION,
+                         )]
         note = ""
         if still_cooking:
             names = list(dict.fromkeys(still_cooking))
@@ -1300,8 +1443,13 @@ class DialogueManager:
             return ""
         from .kitchen_interface import get_line_status
         status = get_line_status(session.order.order_id, line.line_id)
-        if status in ("preparing", "done"):
-            stage = "already being prepared" if status == "preparing" else "already ready"
+        status = normalize_kitchen_status(status)
+        if status in (KitchenStatus.IN_PREPARATION, KitchenStatus.DONE):
+            stage = (
+                "already being prepared"
+                if status is KitchenStatus.IN_PREPARATION
+                else "already ready"
+            )
             return (
                 f"Sorry, your {line.item_name} is {stage}, so I can't change that one now. "
                 "Would you like to order something else instead?"
@@ -1355,7 +1503,7 @@ class DialogueManager:
                     "unit_price": l.unit_price,
                     "subtotal": l.subtotal,
                     "sent": l.sent,
-                    "kitchen_status": l.kitchen_status,
+                    "kitchen_status": serialize_kitchen_status(l.kitchen_status),
                 }
                 for l in lines
             ],
