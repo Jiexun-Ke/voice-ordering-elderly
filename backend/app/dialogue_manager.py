@@ -26,7 +26,7 @@ from .intent import (
     is_tentative,
     wants_default,
 )
-from .kitchen_interface import cancel_line, send_order_to_kitchen
+from .kitchen_interface import cancel_order_line, send_order_to_kitchen
 from .matcher import (
     extract_quantity,
     match_category,
@@ -1080,7 +1080,7 @@ class DialogueManager:
             self._persist(session)
             return True, ""
 
-        result = cancel_line(session.order.order_id, line.line_id)
+        result = cancel_order_line(session.order, line)
         if result["cancelled"]:
             session.order.lines.remove(line)
             self._persist(session)
@@ -1091,6 +1091,8 @@ class DialogueManager:
             "already being prepared"
             if status is KitchenStatus.IN_PREPARATION
             else "already ready"
+            if status is KitchenStatus.DONE
+            else "not available for cancellation"
         )
         return False, (
             f"Sorry, your {line.item_name} is {stage}, so I can't cancel that one. "
@@ -1272,7 +1274,12 @@ class DialogueManager:
                 unavailable_names.append(line.item_name)
                 session.order.lines.remove(line)
 
-        session.order.status = "sent_to_kitchen"
+        accepted_lines = [line for line in new_lines if line.sent]
+        session.order.status = (
+            "sent_to_kitchen"
+            if accepted_lines or any(line.sent for line in session.order.lines)
+            else "in_progress"
+        )
 
         parts = []
         if unavailable_names:
@@ -1281,7 +1288,7 @@ class DialogueManager:
             suggestions = self._suggest_alternatives(unavailable_names)
             if suggestions:
                 parts.append(f"Would you like {suggestions} instead?")
-        if any(l.sent for l in session.order.lines):
+        if accepted_lines:
             parts.append("The rest of your order has been sent to the kitchen."
                          if unavailable_names else "Your order has been sent to the kitchen.")
         parts.append(f"Your total so far is ${session.order.total:.2f}.")

@@ -62,7 +62,13 @@ send_order_to_kitchen(), get_line_status() and cancel_line() with real calls
 JSON shape. Nothing else in this codebase needs to change.
 --------------------------------------------------------------------------
 """
-from .models import KitchenStatus, Order, next_kitchen_status, serialize_kitchen_status
+from .models import (
+    KitchenStatus,
+    Order,
+    next_kitchen_status,
+    normalize_kitchen_status,
+    serialize_kitchen_status,
+)
 
 # Dummy stock levels, standing in for the kitchen's real inventory store.
 _DEFAULT_STOCK = {
@@ -195,6 +201,36 @@ def get_line_status(order_id: str, line_id: str):
     if ticket is not None and ticket[0] != order_id:
         return None
     return serialize_kitchen_status(_LINE_STATUS.get(line_id))
+
+
+def cancel_order_line(order: Order, line) -> dict:
+    """Synchronize a line and apply the shared cancellation status gate.
+
+    Draft lines never reached the kitchen and can be removed directly. Sent
+    lines are refreshed from the kitchen before ``cancel_line`` is called, so
+    HTTP and conversational cancellation cannot rely on stale local state.
+    """
+    if not line.sent:
+        return {"cancelled": True, "status": None, "reason": "not sent to kitchen"}
+
+    status = normalize_kitchen_status(get_line_status(order.order_id, line.line_id))
+    line.kitchen_status = status
+    if status is KitchenStatus.ORDER_RECEIVED:
+        result = cancel_line(order.order_id, line.line_id)
+        line.kitchen_status = normalize_kitchen_status(result.get("status"))
+        return result
+
+    if status is KitchenStatus.IN_PREPARATION:
+        reason = "already being prepared"
+    elif status is KitchenStatus.DONE:
+        reason = "already prepared"
+    else:
+        reason = "kitchen status unavailable"
+    return {
+        "cancelled": False,
+        "status": serialize_kitchen_status(status),
+        "reason": reason,
+    }
 
 
 def cancel_line(order_id: str, line_id: str) -> dict:

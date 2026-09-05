@@ -4,7 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import server
-from backend.app.kitchen_interface import get_stock_status, reset_kitchen, set_stock
+from backend.app.kitchen_interface import (
+    advance_line_status,
+    get_stock_status,
+    reset_kitchen,
+    set_stock,
+)
 
 
 @pytest.fixture
@@ -165,7 +170,128 @@ def test_clarification_then_confirmation_uses_existing_dialogue(client):
     assert state['lines'][0]['kitchen_status'] == 'received'
     assert state['kitchen_mode'] == 'mock'
     assert client.post(path+'/confirm',json=request).json() == first.json()
-    assert client.request('DELETE',path+'/lines/'+state['lines'][0]['key'],json=payload()).status_code == 409
+    assert client.request('DELETE',path+'/lines/'+state['lines'][0]['key'],json=payload()).status_code == 200
+
+
+def test_confirmation_rechecks_stock_and_keeps_all_unavailable_lines_unconfirmed(client):
+    path = new(client)
+    set_stock('chicken_rice', 1)
+    added = client.post(path+'/lines', json=payload(item_id='chicken_rice'))
+    assert added.status_code == 200
+    set_stock('chicken_rice', 0)
+
+    response = client.post(path+'/confirm', json=payload(takeaway=False))
+
+    assert response.status_code == 200
+    assert response.json()['snapshot']['lines'] == []
+    assert response.json()['snapshot']['confirmed'] is False
+    assert 'run out' in response.json()['message'].lower()
+    assert 'sent to the kitchen' not in response.json()['message'].lower()
+    assert get_stock_status('chicken_rice') == 0
+
+
+def test_confirmation_partially_accepts_lines_when_stock_changes(client):
+    path = new(client)
+    set_stock('chicken_rice', 1)
+    set_stock('fried_rice', 1)
+    assert client.post(path+'/lines', json=payload(item_id='chicken_rice')).status_code == 200
+    assert client.post(path+'/lines', json=payload(item_id='fried_rice')).status_code == 200
+    set_stock('chicken_rice', 0)
+
+    response = client.post(path+'/confirm', json=payload(takeaway=False))
+    snapshot = response.json()['snapshot']
+
+    assert response.status_code == 200
+    assert [line['id'] for line in snapshot['lines']] == ['fried_rice']
+    assert snapshot['lines'][0]['sent'] is True
+    assert snapshot['lines'][0]['kitchen_status'] == 'received'
+    assert snapshot['confirmed'] is True
+    assert 'run out' in response.json()['message'].lower()
+    assert 'rest of your order has been sent' in response.json()['message'].lower()
+    assert get_stock_status('chicken_rice') == 0
+    assert get_stock_status('fried_rice') == 0
+
+
+def test_repeated_confirmation_request_does_not_deduct_stock_twice(client):
+    path = new(client)
+    set_stock('kopi', 2)
+    assert client.post(path+'/lines', json=payload(item_id='kopi', quantity=2)).status_code == 200
+    request = payload(takeaway=False)
+
+    first = client.post(path+'/confirm', json=request)
+    second = client.post(path+'/confirm', json=request)
+
+    assert first.status_code == second.status_code == 200
+    assert second.json() == first.json()
+    assert get_stock_status('kopi') == 0
+
+
+def test_http_cancellation_removes_unsent_and_received_lines_once(client):
+    path = new(client)
+    set_stock('kopi', 5)
+    draft = client.post(path+'/lines', json=payload(item_id='kopi', quantity=2)).json()['snapshot']
+    draft_key = draft['lines'][0]['key']
+    before = get_stock_status('kopi')
+
+    removed_draft = client.request('DELETE', path+'/lines/'+draft_key, json=payload())
+    assert removed_draft.status_code == 200
+    assert removed_draft.json()['snapshot']['lines'] == []
+    assert get_stock_status('kopi') == before
+
+    added = client.post(path+'/lines', json=payload(item_id='kopi', quantity=2)).json()['snapshot']
+    line_key = added['lines'][0]['key']
+    assert client.post(path+'/confirm', json=payload(takeaway=False)).status_code == 200
+    assert get_stock_status('kopi') == 3
+    cancel_request = payload()
+
+    first = client.request('DELETE', path+'/lines/'+line_key, json=cancel_request)
+    second = client.request('DELETE', path+'/lines/'+line_key, json=cancel_request)
+
+    assert first.status_code == second.status_code == 200
+    assert second.json() == first.json()
+    assert first.json()['snapshot']['lines'] == []
+    assert get_stock_status('kopi') == 5
+
+
+@pytest.mark.parametrize('advances, expected_status', [(1, 'preparing'), (2, 'done')])
+def test_http_cancellation_rejects_preparing_and_done_lines(client, advances, expected_status):
+    path = new(client)
+    set_stock('kopi', 5)
+    added = client.post(path+'/lines', json=payload(item_id='kopi', quantity=2)).json()['snapshot']
+    line_key = added['lines'][0]['key']
+    assert client.post(path+'/confirm', json=payload(takeaway=False)).status_code == 200
+    status = None
+    for _ in range(advances):
+        status = advance_line_status(line_key)
+    assert status == expected_status
+
+    response = client.request('DELETE', path+'/lines/'+line_key, json=payload())
+
+    assert response.status_code == 409
+    expected_message = 'being prepared' if expected_status == 'preparing' else 'already ready'
+    assert expected_message in response.json()['detail']
+    current = client.get(path).json()['snapshot']
+    assert current['lines'][0]['key'] == line_key
+    assert current['lines'][0]['kitchen_status'] == expected_status
+    assert get_stock_status('kopi') == 3
+
+
+def test_dialogue_cancellation_uses_the_synchronized_kitchen_status_gate(client):
+    path = new(client)
+    set_stock('kopi', 2)
+    added = client.post(path+'/lines', json=payload(item_id='kopi', quantity=2)).json()['snapshot']
+    line_key = added['lines'][0]['key']
+    assert client.post(path+'/confirm', json=payload(takeaway=False)).status_code == 200
+    assert advance_line_status(line_key) == 'preparing'
+
+    response = client.post(
+        path+'/messages', json=payload(text='actually the kopi i dun want already')
+    )
+
+    assert response.status_code == 200
+    assert 'already being prepared' in response.json()['message'].lower()
+    assert response.json()['snapshot']['lines'][0]['kitchen_status'] == 'preparing'
+    assert get_stock_status('kopi') == 0
 
 
 def test_sessions_are_isolated_and_unknown_session_is_not_silently_recreated(client):
