@@ -33,13 +33,13 @@ python3 -m venv .venv
 
 ## What is connected
 
-- **Menu:** fetched from the ordering backend's 12-item sample menu, including its actual modifier options. Its menu differs from the STT catalogue. Kopi-C and Kopi-O are milk choices under Kopi, not separate dishes. Optional choices affect server-calculated prices.
+- **Menu:** fetched from the ordering backend's 12-item sample menu, including its actual modifier options and live `available` / `remaining_stock` fields. Items with zero stock show **Out of stock** and their Add actions are disabled. Its menu differs from the STT catalogue. Kopi-C and Kopi-O are milk choices under Kopi, not separate dishes. Optional choices affect server-calculated prices.
 - **Voice:** Tap to speak → allow microphone access → wait for Listening → speak → Done speaking. AudioWorklet captures mono PCM, and the frontend uploads a 16 kHz WAV to `/api/stt/transcribe`. This avoids reliance on the browser's speech-recognition service and on ffmpeg. Recordings stop after 45 seconds and when you leave the page/tab; cancellation releases the microphone. Low-confidence text is marked for careful review.
 - **Chat:** review/edit the transcript, then press Send. The text goes to the existing backend dialogue manager. Text and menu actions share one backend order. The STT service's parsed order is not silently applied; the reviewed transcript goes to the dialogue service, which owns the menu, follow-up questions, quantities and prices.
-- **Order:** server-backed quantities, preference changes, removals and totals. Confirmation includes dine-in/takeaway and reaches the backend's **mock kitchen**. It does not submit to a real restaurant or charge money. Confirmed lines cannot be edited using the cart controls.
+- **Order:** server-backed quantities, preference changes, removals and totals. Confirmation includes dine-in/takeaway and reaches the backend's **mock kitchen**. Accepted lines display **ORDER RECEIVED**, **IN PREPARATION** or **DONE**; cancellation is available only before preparation starts. It does not submit to a real restaurant or charge money. Confirmed lines cannot be edited using the cart controls.
 - **Listen:** uses the browser's installed text-to-speech voices to read menu items, replies and the order.
 - **Sessions:** a session identifier in sessionStorage lets refreshes restore this tab's order and conversation. Backend sessions are in memory and are lost when its process restarts. The page reports an expired session and starts a fresh one on reload.
-- **Failures:** visible backend errors retain the draft and last known cart. Retry connection reuses the same request ID, so retrying a lost response does not add the item twice. Audio errors keep typing available.
+- **Failures:** visible backend errors retain the draft and last known cart. A stock `409` explains the conflict and refreshes the menu availability before the next attempt. Retry connection reuses the same request ID, so retrying a lost response does not add the item twice. Audio errors keep typing available.
 
 The interface and curated menu descriptions support English/Chinese. The dialogue manager currently understands English and Singlish; it is rule-based, not a general AI chatbot. Arbitrary menu-link/photo extraction and AI menu translation are still future work. The existing link/photo/QR opening page remains available.
 
@@ -50,6 +50,14 @@ The interface and curated menu descriptions support English/Chinese. The dialogu
 3. Add Hainanese Chicken Rice from Menu. The shared total becomes **$7.30**.
 4. Change quantities/preferences in Order, then review and confirm with the local demo kitchen.
 5. Try `one fishball noodles` in a fresh session and answer the helper's question about noodle type.
+
+### Demonstrate stock and kitchen status
+
+For a deterministic end-to-end API walkthrough, use the [backend stock and
+kitchen status demo](../backend/README.md#local-stock-and-kitchen-status-demo).
+It uses the same HTTP routes as the page and the process-local mock helper to
+force stock to zero or one. The browser page reflects the same rules: it never
+authorizes a cart change by itself; the ordering backend remains authoritative.
 
 If Voice ready is absent, use Check connection and inspect the speech terminal. Model loading may take time on the first run. Microphone access requires localhost or HTTPS and browser/OS permission. The default generic Whisper model may mishear Singlish, so always review the transcript.
 

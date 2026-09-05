@@ -5,7 +5,7 @@ Our Minimal viable product for the Agentic AI Hackathon - Developing a speech-ba
 
 ## Where the project is now
 
-The website now connects **Menu / Chat / Order** to the local speech and ordering backends. Microphone recordings go to `POST /transcribe`; after the diner reviews the transcript and presses Send, the existing dialogue manager handles the message and updates the shared server order. Menu buttons, quantities, preferences and confirmation also use the ordering API. Kitchen submission remains a local mock. Photo/link menu analysis and AI translation are future work.
+The website now connects **Menu / Chat / Order** to the local speech and ordering backends. Microphone recordings go to `POST /transcribe`; after the diner reviews the transcript and presses Send, the existing dialogue manager handles the message and updates the shared server order. Menu buttons, quantities, preferences and confirmation also use the ordering API. Draft cart changes are checked against live stock, confirmation rechecks stock before sending new lines to the kitchen, and accepted lines expose the `received` → `preparing` → `done` lifecycle. Kitchen submission remains a local mock. Photo/link menu analysis and AI translation are future work.
 
 ```
 [Menu / Chat / Order] -> frontend API proxy -> [STT :8000] + [Ordering :8001]
@@ -33,8 +33,12 @@ order : 2x Kopi-C (siew dai) — takeaway        every field correct, ~2.6s
 Quick check that your machine is set up — no model download needed:
 
 ```bash
-python -m pytest tests/ -q          # expect 63 passed
+python -m pytest tests/ -q          # expect 99 passed
 ```
+
+The complete stock/status walkthrough, including the local mock controls for
+setting stock and advancing a kitchen ticket, is documented in the [backend
+README](backend/README.md#local-stock-and-kitchen-status-demo).
 
 ## How the pieces fit
 

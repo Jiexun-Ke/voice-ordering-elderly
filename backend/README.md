@@ -1,4 +1,4 @@
-# Elderly-Friendly Voice Ordering — Order Matching & Dialogue Service
+q# Elderly-Friendly Voice Ordering — Order Matching & Dialogue Service
 
 Replaces a QR-code / touchscreen menu with speech. This module sits between
 two other pieces of the system and owns everything in the middle:
@@ -36,6 +36,107 @@ The website uses `server.py` as a small HTTP adapter around the existing dialogu
 The frontend server proxies `/api/order/*` to this service and `/api/stt/*` to the separate STT service on port 8000. The browser uses the ordering menu's 12 items and server-calculated prices. Sessions are isolated and held in memory; restarting this web API clears its demo sessions. The CLI's file-backed table sessions remain separate.
 
 Routes: `GET /health`, `GET /menu`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, `POST /sessions/{id}/lines`, `PATCH` or `DELETE /sessions/{id}/lines/{line_id}`, `POST /sessions/{id}/lines/{line_id}/advance-status` (local mock-kitchen demo only), and `POST /sessions/{id}/confirm`. All order-changing requests include a UUID `request_id` for idempotent retries. Menu responses include live mock-stock availability, and session snapshots include each line's current kitchen status. The response includes a complete cart snapshot and conversation. Only confirmed orders reach the existing mock kitchen. See `/docs` on port 8001 for request schemas.
+
+### Local stock and kitchen status demo
+
+The mock kitchen is deliberately in memory. `set_stock(item_id, quantity)` is
+a Python test/demo helper, not a public API route; it must run in the same
+Python process as the API. The following deterministic walkthrough uses
+FastAPI's `TestClient`, so it exercises the real HTTP routes while sharing that
+mock state. Run it from the repository root in a Python REPL (or paste the
+body into a one-shot `python -` invocation):
+
+```python
+from uuid import uuid4
+from fastapi.testclient import TestClient
+
+from backend import server
+from backend.app.kitchen_interface import get_stock_status, reset_kitchen, set_stock
+
+server.sessions.clear()
+reset_kitchen()
+client = TestClient(server.app)
+
+def payload(**values):
+    return {"request_id": str(uuid4()), **values}
+
+def new_session():
+    session_id = client.post("/sessions").json()["snapshot"]["session_id"]
+    return "/sessions/" + session_id
+
+def menu_item(item_id):
+    return next(item for item in client.get("/menu").json()["items"]
+                if item["id"] == item_id)
+
+# 1-4. Zero stock is visible, Add is rejected with a structured 409.
+path = new_session()
+set_stock("chicken_rice", 0)
+assert menu_item("chicken_rice")["available"] is False
+assert menu_item("chicken_rice")["remaining_stock"] == 0
+conflict = client.post(path + "/lines", json=payload(item_id="chicken_rice"))
+assert conflict.status_code == 409
+assert conflict.json()["detail"]["code"] == "stock_unavailable"
+print("unavailable:", conflict.status_code, conflict.json()["detail"])
+
+# 5-8. Restock, add, confirm, and observe ORDER_RECEIVED on the snapshot.
+set_stock("chicken_rice", 1)
+assert menu_item("chicken_rice")["available"] is True
+added = client.post(path + "/lines", json=payload(item_id="chicken_rice"))
+line_key = added.json()["snapshot"]["lines"][0]["key"]
+confirmed = client.post(path + "/confirm", json=payload(takeaway=False))
+assert confirmed.status_code == 200
+assert confirmed.json()["snapshot"]["lines"][0]["kitchen_status"] == "received"
+print("confirmed:", confirmed.json()["snapshot"]["lines"][0]["kitchen_status"])
+
+# 9-10. Advance to preparation; cancellation is rejected with HTTP 409.
+advance = path + "/lines/" + line_key + "/advance-status"
+preparing = client.post(advance, json=payload())
+assert preparing.status_code == 200
+assert preparing.json()["snapshot"]["lines"][0]["kitchen_status"] == "preparing"
+blocked = client.request("DELETE", path + "/lines/" + line_key, json=payload())
+assert blocked.status_code == 409
+assert "already being prepared" in blocked.json()["detail"]
+print("preparing cancellation:", preparing.status_code, blocked.status_code)
+
+# 11-12. A received line can be cancelled and restores its exact stock.
+path = new_session()
+set_stock("kopi", 1)
+added = client.post(path + "/lines", json=payload(item_id="kopi"))
+line_key = added.json()["snapshot"]["lines"][0]["key"]
+assert client.post(path + "/confirm", json=payload(takeaway=False)).status_code == 200
+cancelled = client.request("DELETE", path + "/lines/" + line_key, json=payload())
+assert cancelled.status_code == 200
+assert cancelled.json()["snapshot"]["lines"] == []
+assert get_stock_status("kopi") == 1
+print("received cancellation/restoration:", cancelled.status_code, get_stock_status("kopi"))
+
+reset_kitchen()
+server.sessions.clear()
+print("demo: PASS")
+```
+
+On Windows PowerShell, start the REPL with
+`.\.venv\Scripts\python.exe`; on macOS/Linux use `.venv/bin/python`.
+Because the mock state is process-local, do not run `set_stock()` in a second
+terminal expecting it to change an already-running Uvicorn process. The
+`advance-status` HTTP route is the documented local kitchen operation: each
+request moves one accepted line from `received` to `preparing` to `done`, and
+it accepts no target status.
+
+The ordering contract is:
+
+- `GET /menu` returns each item with `available` and `remaining_stock`.
+- `POST /sessions/{id}/lines` checks the draft cart without reserving stock.
+  A conflict returns `409` with `detail.code = "stock_unavailable"`, the
+  `item_id`, `requested_quantity`, and `available_quantity`.
+- `POST /sessions/{id}/confirm` performs the final stock check. Unavailable
+  draft lines are not sent or charged; available lines may still be accepted.
+- Accepted snapshot lines expose `kitchen_status` as `received`, `preparing`,
+  or `done`, displayed by the frontend as ORDER RECEIVED, IN PREPARATION, or
+  DONE.
+- `DELETE /sessions/{id}/lines/{line_id}` removes a draft or a received line.
+  It returns `409` once the synchronized kitchen status is `preparing` or
+  `done`; a successful cancellation restores the accepted quantity exactly.
 
 This is a local development API bound to loopback, with no public authentication or production persistence. Full startup and test instructions are in [the frontend README](../frontend/README.md).
 
