@@ -50,7 +50,8 @@ What we expect back:
 Every accepted line moves through:  received -> preparing -> done
 
     get_line_status(order_id, line_id) -> str | None
-    cancel_line(order_id, line_id)     -> {"cancelled": bool, "status": str, "reason": str}
+    cancel_line(order_id, line_id)     -> {"line_id": str, "cancelled": bool,
+                                            "status": str, "reason": str}
 
 A line can only be cancelled while it is still "received". Once the kitchen
 has started cooking ("preparing") or finished ("done"), cancellation is
@@ -228,7 +229,12 @@ def cancel_order_line(order: Order, line) -> dict:
     HTTP and conversational cancellation cannot rely on stale local state.
     """
     if not line.sent:
-        return {"cancelled": True, "status": None, "reason": "not sent to kitchen"}
+        return {
+            "line_id": line.line_id,
+            "cancelled": True,
+            "status": None,
+            "reason": "not sent to kitchen",
+        }
 
     status = normalize_kitchen_status(get_line_status(order.order_id, line.line_id))
     line.kitchen_status = status
@@ -244,6 +250,7 @@ def cancel_order_line(order: Order, line) -> dict:
     else:
         reason = "kitchen status unavailable"
     return {
+        "line_id": line.line_id,
         "cancelled": False,
         "status": serialize_kitchen_status(status),
         "reason": reason,
@@ -259,26 +266,39 @@ def cancel_line(order_id: str, line_id: str) -> dict:
     ticket = _LINE_TICKETS.get(line_id)
     if key in _CANCELLED_LINES:
         return {
+            "line_id": line_id,
             "cancelled": True,
             "status": "received",
             "reason": "already cancelled",
         }
     if ticket is None or ticket[0] != order_id:
         # Never reached the kitchen, so there is nothing to cancel there.
-        return {"cancelled": True, "status": None, "reason": "not sent to kitchen"}
+        return {
+            "line_id": line_id,
+            "cancelled": True,
+            "status": None,
+            "reason": "not sent to kitchen",
+        }
     status = _LINE_STATUS.get(line_id)
     if status is None:
-        return {"cancelled": True, "status": None, "reason": "already cancelled"}
+        return {
+            "line_id": line_id,
+            "cancelled": True,
+            "status": None,
+            "reason": "already cancelled",
+        }
     if status is KitchenStatus.ORDER_RECEIVED:
         _LINE_STATUS.pop(line_id, None)
         _STOCK[ticket[1]] = get_stock_status(ticket[1]) + ticket[2]
         _CANCELLED_LINES.add(key)
         return {
+            "line_id": line_id,
             "cancelled": True,
             "status": serialize_kitchen_status(status),
             "reason": "cancelled before preparation",
         }
     return {
+        "line_id": line_id,
         "cancelled": False,
         "status": serialize_kitchen_status(status),
         "reason": (

@@ -350,7 +350,7 @@ at a time:
 | Mid-order change | "aiya wait wait, make it kway teow instead" | Detected via `change_item` intent keywords; updates the right line (asks which one first if there's more than one candidate) |
 | Multiple changes at once | "actually make it kopi-c kosong" | Every named modifier is applied together, not just the first one matched |
 | Removing an item | "eh the prata i dun want already" | Matches against what's actually in the cart; asks "all of them or just one?" if there are duplicates |
-| Full cancel | "cancel" / "never mind" | Mid-clarification: cancels just that one item. With no pending question: clears the whole cart. |
+| Full cancel | "cancel" / "never mind" | Mid-clarification: cancels just that one pending item. With no pending question: removes draft/received lines, but keeps preparing/done lines on the bill. |
 | Trailing content after answering | "kway teow, and also a kopi" (said while answering a noodle-type question) | The answer is consumed for the question; anything said after it is queued and processed as a new item, not dropped |
 | Extra modifiers in an answer | "bee hoon, dry" (answering a noodle-type question) | The answer resolves the open question *and* the additional modifier is applied, rather than being discarded |
 | Mentioning food without ordering | "I've had too much coffee today" | Recognized as commentary — nothing is added to the cart |
@@ -374,6 +374,10 @@ and that status decides whether the customer can still change their mind:
 - `preparing` or `done` → **refused**, plainly: *"Sorry, the kitchen has already
   started on your Nasi Lemak, so I can't cancel that one."* The food exists and
   someone has to pay for it.
+
+A full conversational cancellation applies the same rules to every line: draft
+and `received` lines are removed, while `preparing` and `done` lines remain on
+the bill. A received line's accepted stock is restored exactly once.
 
 If the kitchen reports an item is out of stock, that line is **removed from the
 bill** (so the customer is never charged for food that can't be made), named

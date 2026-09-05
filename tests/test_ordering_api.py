@@ -266,6 +266,7 @@ def test_http_cancellation_removes_unsent_and_received_lines_once(client):
 
     assert first.status_code == second.status_code == 200
     assert second.json() == first.json()
+    assert first.json()['line_id'] == line_key
     assert first.json()['snapshot']['lines'] == []
     assert get_stock_status('kopi') == 5
 
@@ -309,6 +310,29 @@ def test_dialogue_cancellation_uses_the_synchronized_kitchen_status_gate(client)
     assert 'already being prepared' in response.json()['message'].lower()
     assert response.json()['snapshot']['lines'][0]['kitchen_status'] == 'preparing'
     assert get_stock_status('kopi') == 0
+
+
+def test_dialogue_full_cancellation_respects_status_gate_and_restores_received_stock(client):
+    path = new(client)
+    set_stock('kopi', 1)
+    set_stock('teh', 1)
+    kopi = client.post(path+'/lines', json=payload(item_id='kopi')).json()['snapshot']['lines'][0]
+    second_snapshot = client.post(path+'/lines', json=payload(item_id='teh')).json()['snapshot']
+    teh = next(line for line in second_snapshot['lines'] if line['id'] == 'teh')
+    assert client.post(path+'/confirm', json=payload(takeaway=False)).status_code == 200
+    assert get_stock_status('kopi') == 0
+    assert get_stock_status('teh') == 0
+    assert advance_line_status(teh['key']) == 'preparing'
+
+    response = client.post(path+'/messages', json=payload(text='cancel'))
+
+    assert response.status_code == 200
+    snapshot = response.json()['snapshot']
+    assert [line['key'] for line in snapshot['lines']] == [teh['key']]
+    assert snapshot['lines'][0]['kitchen_status'] == 'preparing'
+    assert 'couldn\'t cancel' in response.json()['message'].lower()
+    assert get_stock_status('kopi') == 1
+    assert get_stock_status('teh') == 0
 
 
 def test_session_get_synchronizes_status_after_mock_helper_update(client):

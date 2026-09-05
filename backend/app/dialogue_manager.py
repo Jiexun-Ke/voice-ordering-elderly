@@ -148,10 +148,26 @@ class DialogueManager:
         if intent == "pay_bill":
             return self._handle_pay_bill(session)
         if intent == "cancel_order":
-            session.order.lines.clear()
+            removed_lines, blocked_lines = [], []
+            for line in list(session.order.lines):
+                removed, _ = self._try_remove_line(session, line)
+                (removed_lines if removed else blocked_lines).append(line)
             session.chunk_queue.clear()
+            if not any(line.sent for line in session.order.lines):
+                session.order.status = "in_progress"
+            self._persist(session)
+
+            if blocked_lines:
+                blocked_names = ", ".join(dict.fromkeys(line.item_name for line in blocked_lines))
+                if removed_lines:
+                    message = f"I removed {len(removed_lines)} cancellable item(s), but I couldn't cancel {blocked_names}. "
+                else:
+                    message = f"I couldn't cancel {blocked_names}. "
+                message += "The kitchen has already started or finished those items, so they stay on your bill."
+            else:
+                message = "Okay, I've cleared your order. What would you like to start with?"
             return DialogueResponse(
-                message="Okay, I've cleared your order. What would you like to start with?",
+                message=message,
                 needs_clarification=False,
                 order_snapshot=self._snapshot(session),
             )

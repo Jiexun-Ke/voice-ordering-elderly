@@ -97,7 +97,7 @@ def mutate(session_id, request, action, resource=""):
 
 def reply(entry, message, **extra):
     entry["messages"].append({"role": "assistant", "text": message, **extra})
-    return {"message": message}
+    return {"message": message, **extra}
 
 
 def checked_choices(choice):
@@ -279,7 +279,7 @@ def remove_line(session_id: UUID, line_id: UUID, request: Mutation):
         if not result["cancelled"]:
             raise HTTPException(409, cancellation_message(line, result))
         entry["session"].order.lines.remove(line)
-        return reply(entry, f"Removed {line.item_name}.")
+        return reply(entry, f"Removed {line.item_name}.", line_id=line.line_id)
     return mutate(str(session_id), request, remove, str(line_id))
 
 

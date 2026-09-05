@@ -33,7 +33,7 @@ order : 2x Kopi-C (siew dai) — takeaway        every field correct, ~2.6s
 Quick check that your machine is set up — no model download needed:
 
 ```bash
-python -m pytest tests/ -q          # expect 99 passed
+python -m pytest tests/ -q          # expect 100 passed
 ```
 
 The complete stock/status walkthrough, including the local mock controls for

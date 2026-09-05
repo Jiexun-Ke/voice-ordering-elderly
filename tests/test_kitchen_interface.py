@@ -117,6 +117,7 @@ def test_received_cancellation_restores_exact_stock_once_and_is_idempotent():
     second = kitchen.cancel_line("order-1", line.line_id)
 
     assert first == {
+        "line_id": "line-cancel",
         "cancelled": True,
         "status": "received",
         "reason": "cancelled before preparation",
@@ -146,6 +147,7 @@ def test_cancellation_is_rejected_after_preparation_starts(
     result = kitchen.cancel_line("order-1", line.line_id)
 
     assert result["cancelled"] is False
+    assert result["line_id"] == "line-too-late"
     assert result["status"] == expected_status
     assert result["reason"] == expected_reason
     assert kitchen.get_stock_status("kopi") == 3
